@@ -218,7 +218,7 @@ function applyRecommendation(inv: Investigation, recommended: RiskAction): void 
 
   let changed = false;
   if (stillOpen && compareActions(recommended, applied) > 0) {
-    const reason = `AI investigation ${inv.id} recommended ${recommended}`;
+    const reason = `AI investigation ${inv.id} recommended ${recommended}.`;
     if (payment.status === "PENDING_VERIFICATION" && compareActions(recommended, "HOLD") >= 0) {
       changed = holdPayment("ai-investigator", payment.id, reason).changed || changed;
     }

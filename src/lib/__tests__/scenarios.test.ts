@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { addBeneficiary, login } from "@/lib/bank";
 import { DomainError } from "@/lib/errors";
 import { whenIdle } from "@/lib/investigations";
-import { executePayment, requestTransfer } from "@/lib/payment-gateway";
+import { RISK_THRESHOLDS } from "@/lib/config";
+import { crossingRecord, executePayment, requestTransfer } from "@/lib/payment-gateway";
+import { firstCrossing } from "@/lib/risk-engine";
 import { nextScenarioStep, startScenario } from "@/lib/scenarios";
 import { getSnapshot } from "@/lib/snapshot";
 import { SEED_BENEFICIARY_IDS } from "@/lib/store";
-import type { ToolName } from "@/lib/types";
+import type { RiskAssessment, RiskSignalId, ToolName } from "@/lib/types";
 import { attackerSession, auditActions, freshStore, iphoneSession, runScenario } from "./helpers";
 
 beforeEach(freshStore);
@@ -286,5 +288,70 @@ describe("SIM swap re-assessment", () => {
     expect(getSnapshot().risk[attacker.id].score).toBe(15);
     nextScenarioStep();
     expect(getSnapshot().risk[attacker.id].score).toBe(40);
+  });
+});
+
+describe("staged hold in the gateway's own record", () => {
+  it("scenario B: the hold names 75 (High, Unusual amount), the restriction 90 (Critical, Rapid sequence)", async () => {
+    const s = runScenario("B");
+    const attacker = attackerSession(s);
+    const payment = s.payments.find((p) => p.sessionId === attacker.id)!;
+    await whenIdle();
+    const after = getSnapshot();
+
+    const held = after.audit.find((e) => e.action === "PAYMENT_HELD" && e.paymentId === payment.id)!;
+    expect(held.actor).toBe("payment-gateway");
+    expect(held.detail).toBe(
+      "Payment of AED 85,000 held before debit. Running score reached 75 (High) with signal Unusual amount.",
+    );
+    expect(held.data).toMatchObject({ score: 75, level: "HIGH", signal: "UNUSUAL_AMOUNT", amount: 85000 });
+
+    const restricted = after.audit.find((e) => e.action === "SESSION_RESTRICTED" && e.sessionId === attacker.id)!;
+    expect(restricted.actor).toBe("payment-gateway");
+    expect(restricted.detail).toContain("Session restricted. Running score reached 90 (Critical) with signal Rapid sequence.");
+    expect(restricted.data).toEqual({ score: 90, level: "CRITICAL", signal: "RAPID_SEQUENCE" });
+
+    const reasons = after.payments.find((p) => p.id === payment.id)!.reasons;
+    expect(reasons).toContain("Held by payment-gateway: Running score reached 75 (High) with signal Unusual amount.");
+    expect(reasons).toContain("Session restricted by payment-gateway: Running score reached 90 (Critical) with signal Rapid sequence.");
+
+    // The decision itself is unchanged: one assessment, HOLD_AND_RESTRICT at 90.
+    expect(payment).toMatchObject({ status: "HELD", riskScore: 90, riskLevel: "CRITICAL", action: "HOLD_AND_RESTRICT" });
+    expect(after.sessions.find((x) => x.id === attacker.id)?.status).toBe("RESTRICTED");
+  });
+
+  it("one signal that crosses both thresholds triggers both the hold and the restriction", () => {
+    const at = "2026-03-15T02:03:00+04:00";
+    const risk: RiskAssessment = {
+      sessionId: "sess-x",
+      score: 85,
+      level: "CRITICAL",
+      action: "HOLD_AND_RESTRICT",
+      assessedAt: at,
+      signals: [
+        { id: "UNKNOWN_DEVICE", label: "Unknown device", points: 15, evidence: "e", cumulative: 15, detectedAt: at },
+        { id: "NEW_BENEFICIARY", label: "New beneficiary", points: 15, evidence: "e", cumulative: 30, detectedAt: at },
+        { id: "UNUSUAL_AMOUNT", label: "Unusual amount", points: 55, evidence: "e", cumulative: 85, detectedAt: at },
+      ],
+    };
+    expect(firstCrossing(risk, RISK_THRESHOLDS.high)).toEqual({
+      score: 85,
+      level: "CRITICAL",
+      signal: "UNUSUAL_AMOUNT",
+      signalLabel: "Unusual amount",
+    });
+    expect(crossingRecord(risk, RISK_THRESHOLDS.high).text).toBe("Running score reached 85 (Critical) with signal Unusual amount.");
+    expect(crossingRecord(risk, RISK_THRESHOLDS.critical)).toEqual({
+      text: "Running score reached 85 (Critical) with signal Unusual amount.",
+      data: { score: 85, level: "CRITICAL", signal: "UNUSUAL_AMOUNT" },
+    });
+  });
+
+  it("walks the signals in canonical order even if they are listed out of order", () => {
+    const at = "2026-03-15T02:03:00+04:00";
+    const sig = (id: RiskSignalId, cumulative: number) => ({ id, label: id, points: 0, evidence: "e", cumulative, detectedAt: at });
+    const crossing = firstCrossing({ signals: [sig("RAPID_SEQUENCE", 90), sig("UNKNOWN_DEVICE", 15), sig("UNUSUAL_AMOUNT", 75)] }, 60);
+    expect(crossing?.signal).toBe("UNUSUAL_AMOUNT");
+    expect(firstCrossing({ signals: [sig("UNKNOWN_DEVICE", 15)] }, 60)).toBeNull();
   });
 });

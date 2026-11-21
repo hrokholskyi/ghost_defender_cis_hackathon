@@ -12,18 +12,42 @@ import {
   findPayment,
 } from "@/lib/bank";
 import { advanceClock, now } from "@/lib/clock";
+import { RISK_LEVEL_LABELS, RISK_THRESHOLDS } from "@/lib/config";
 import { DomainError } from "@/lib/errors";
 import { formatAed } from "@/lib/format";
 import { startInvestigation } from "@/lib/investigations";
 import { holdPayment, restrictSession } from "@/lib/policy-gateway";
+import { firstCrossing } from "@/lib/risk-engine";
 import { parseInput, transferSchema } from "@/lib/schemas";
 import { getState, nextId, touch } from "@/lib/store";
 import type { z } from "zod";
-import type { Payment, PaymentResponse, RiskAssessment, Session } from "@/lib/types";
+import type { Payment, PaymentResponse, RiskAssessment, RiskLevel, RiskSignalId, Session } from "@/lib/types";
 import { createVerification } from "@/lib/verification";
 
 function baseReasons(risk: RiskAssessment): string[] {
   return risk.signals.map((s) => `${s.label}: ${s.evidence} (+${s.points})`);
+}
+
+/**
+ * Text and audit data for the threshold that triggered a hold (High) or a
+ * restriction (Critical): the first signal, in RISK_SIGNAL_ORDER, whose
+ * running score reached it. Falls back to the final score if none did.
+ */
+export function crossingRecord(
+  risk: RiskAssessment,
+  threshold: number,
+): { text: string; data: { score: number; level: RiskLevel; signal: RiskSignalId | null } } {
+  const crossing = firstCrossing(risk, threshold);
+  if (!crossing) {
+    return {
+      text: `Risk score ${risk.score} (${RISK_LEVEL_LABELS[risk.level]}).`,
+      data: { score: risk.score, level: risk.level, signal: null },
+    };
+  }
+  return {
+    text: `Running score reached ${crossing.score} (${RISK_LEVEL_LABELS[crossing.level]}) with signal ${crossing.signalLabel}.`,
+    data: { score: crossing.score, level: crossing.level, signal: crossing.signal },
+  };
 }
 
 /** One field of the raw body, checked with its transfer schema, or undefined when absent or invalid. */
@@ -168,14 +192,15 @@ export function requestTransfer(token: string | null, raw: unknown): PaymentResp
       detail: `${formatAed(payment.amount)} waits for step-up verification. Nothing debited`,
     });
   } else {
+    // One assessment, one decision. The record names the point where the running score
+    // crossed each threshold, so the staged story (held at 75, restricted at 90) is literally true.
     payment.reasons = [`Risk ${risk.score} (${risk.level}): held before debit`, ...baseReasons(risk)];
-    holdPayment("payment-gateway", paymentId, `Risk ${risk.score} (${risk.level}) -> ${risk.action}`);
+    const hold = crossingRecord(risk, RISK_THRESHOLDS.high);
+    holdPayment("payment-gateway", paymentId, hold.text, hold.data);
     if (risk.action === "HOLD_AND_RESTRICT") {
-      restrictSession(
-        "payment-gateway",
-        session.id,
-        `Risk ${risk.score} (${risk.level}) on a transfer of ${formatAed(payment.amount)}`,
-      );
+      const restrict = crossingRecord(risk, RISK_THRESHOLDS.critical);
+      restrictSession("payment-gateway", session.id, restrict.text, restrict.data);
+      payment.reasons.push(`Session restricted by payment-gateway: ${restrict.text}`);
     }
   }
 

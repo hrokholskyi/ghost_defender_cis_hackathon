@@ -2,7 +2,7 @@
  * Demo configuration of the transparent point model and the simulator.
  * Demo weights and thresholds. Not a calibrated model.
  */
-import type { RiskConfig, RiskSignalId } from "@/lib/types";
+import type { RiskConfig, RiskLevel, RiskSignalId } from "@/lib/types";
 
 export const RISK_WEIGHTS: Record<RiskSignalId, number> = {
   UNKNOWN_DEVICE: 15,
@@ -15,6 +15,14 @@ export const RISK_WEIGHTS: Record<RiskSignalId, number> = {
 
 /** Lower bound of each level: 0-29 LOW, 30-59 ELEVATED, 60-79 HIGH, 80-100 CRITICAL. */
 export const RISK_THRESHOLDS = { elevated: 30, high: 60, critical: 80 } as const;
+
+/** Readable level names for text, for example "Critical" instead of CRITICAL. */
+export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
+  LOW: "Low",
+  ELEVATED: "Elevated",
+  HIGH: "High",
+  CRITICAL: "Critical",
+};
 
 export const RISK_DISCLAIMER = "Demo weights and thresholds. Not a calibrated model.";
 

@@ -137,8 +137,13 @@ function authorize(
 // Tightening
 // ---------------------------------------------------------------------------
 
-/** PENDING_VERIFICATION -> HELD. No debit. */
-export function holdPayment(actor: Actor, paymentId: string, reason: string): PolicyDecision {
+/** PENDING_VERIFICATION -> HELD. No debit. `data` is added to the audit entry. */
+export function holdPayment(
+  actor: Actor,
+  paymentId: string,
+  reason: string,
+  data: Record<string, unknown> = {},
+): PolicyDecision {
   const payment = findPayment(paymentId);
   const target = { paymentId, sessionId: payment?.sessionId };
   const denied = authorize(actor, "HOLD_PAYMENT", target);
@@ -156,14 +161,19 @@ export function holdPayment(actor: Actor, paymentId: string, reason: string): Po
     action: "PAYMENT_HELD",
     sessionId: payment.sessionId,
     paymentId,
-    detail: `${formatAed(payment.amount)} held before debit. ${reason}`,
-    data: { amount: payment.amount },
+    detail: `Payment of ${formatAed(payment.amount)} held before debit. ${reason}`,
+    data: { ...data, amount: payment.amount },
   });
   return { allowed: true, changed: true, reason };
 }
 
-/** ACTIVE -> RESTRICTED. */
-export function restrictSession(actor: Actor, sessionId: string, reason: string): PolicyDecision {
+/** ACTIVE -> RESTRICTED. `data` is added to the audit entry. */
+export function restrictSession(
+  actor: Actor,
+  sessionId: string,
+  reason: string,
+  data: Record<string, unknown> = {},
+): PolicyDecision {
   const target = { sessionId };
   const denied = authorize(actor, "RESTRICT_SESSION", target);
   if (denied) return denied;
@@ -178,7 +188,8 @@ export function restrictSession(actor: Actor, sessionId: string, reason: string)
     actor,
     action: "SESSION_RESTRICTED",
     sessionId,
-    detail: `Session restricted: no payments or beneficiary changes. ${reason}`,
+    detail: `Session restricted. ${reason} No payments or beneficiary changes.`,
+    ...(Object.keys(data).length > 0 ? { data } : {}),
   });
   return { allowed: true, changed: true, reason };
 }

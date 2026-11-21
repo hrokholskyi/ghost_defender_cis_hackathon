@@ -136,6 +136,28 @@ export function evaluateSignals(facts: RiskFacts): Partial<Record<RiskSignalId, 
   return fired;
 }
 
+/** The point where the running score first reached a threshold. */
+export interface ThresholdCrossing {
+  /** Running score after the signal. */
+  score: number;
+  /** Level of that running score. */
+  level: RiskLevel;
+  signal: RiskSignalId;
+  signalLabel: string;
+}
+
+/**
+ * Walks the fired signals in RISK_SIGNAL_ORDER and returns the first one
+ * whose running score (`cumulative`) reaches `threshold`, or null. The hold is
+ * triggered at the High threshold, the restriction at the Critical one.
+ */
+export function firstCrossing(risk: Pick<RiskAssessment, "signals">, threshold: number): ThresholdCrossing | null {
+  const ordered = [...risk.signals].sort((a, b) => RISK_SIGNAL_ORDER.indexOf(a.id) - RISK_SIGNAL_ORDER.indexOf(b.id));
+  const hit = ordered.find((s) => s.cumulative >= threshold);
+  if (!hit) return null;
+  return { score: hit.cumulative, level: levelForScore(hit.cumulative), signal: hit.id, signalLabel: hit.label };
+}
+
 /** Score, level and action from a set of signals. */
 export function scoreSignals(ids: RiskSignalId[]): { score: number; level: RiskLevel; action: RiskAction } {
   const score = Math.min(
