@@ -12,7 +12,15 @@ import type {
   ToolName,
 } from "@/lib/types";
 
+/** LLM availability, shown in the dashboard. */
+export function getLlmStatus(): { configured: boolean; model: string | null } {
+  const forced = process.env.GLD_FORCE_FALLBACK === "1";
+  const configured = !forced && Boolean(process.env.ANTHROPIC_API_KEY);
+  return { configured, model: configured ? (process.env.GLD_MODEL ?? "claude-sonnet-5-5") : null };
+}
+
 export const runInvestigation: RunInvestigation = async (ctx, tools, sink, options) => {
+  const stepDelayMs = options?.stepDelayMs ?? Number(process.env.GLD_STEP_DELAY_MS ?? 600);
   sink.engineSelected({
     engine: "deterministic-fallback",
     fallbackReason: "Placeholder investigator (no LLM wired yet)",
@@ -29,7 +37,7 @@ export const runInvestigation: RunInvestigation = async (ctx, tools, sink, optio
       startedAt: sink.now(),
     };
     sink.stepStarted(started);
-    if (options?.stepDelayMs) await new Promise((r) => setTimeout(r, options.stepDelayMs));
+    if (stepDelayMs > 0) await new Promise((r) => setTimeout(r, stepDelayMs));
     const output = await run();
     sink.stepFinished({ ...started, status: "ok", output, finishedAt: sink.now() });
     return output;
