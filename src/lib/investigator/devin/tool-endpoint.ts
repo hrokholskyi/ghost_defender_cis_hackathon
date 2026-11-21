@@ -11,7 +11,7 @@
  *   shows up on the dashboard timeline by itself.
  * - Nothing here can move, release or block money.
  */
-import { bearerToken } from "@/lib/http";
+import { bearerToken, readTextLimited } from "@/lib/http";
 import type { InvestigationTools } from "@/lib/types";
 import { errorMessage } from "../steps";
 import { describeZodError, submittedVerdictSchema } from "../verdict";
@@ -70,17 +70,20 @@ export async function handleToolRequest(request: Request, toolName: string, opti
   const spec = TOOL_TABLE.get(toolName);
   if (!spec) return fail(404, "NOT_FOUND", "Unknown tool");
 
+  // The method is checked first, so a wrong method does not use up a call.
+  const method = request.method.toUpperCase();
+  if (spec.kind === "read") {
+    if (method !== "GET" && method !== "POST") return fail(405, "METHOD_NOT_ALLOWED", "Use GET or POST", { Allow: "GET, POST" });
+  } else if (method !== "POST") {
+    return fail(405, "METHOD_NOT_ALLOWED", "Use POST", { Allow: "POST" });
+  }
+
   if (grant.callCount >= grant.maxCalls) {
     return fail(429, "CALL_LIMIT_REACHED", "Tool call limit reached for this investigation. Submit your verdict with what you have.");
   }
   grant.callCount += 1;
 
-  const method = request.method.toUpperCase();
-  if (spec.kind === "read") {
-    if (method !== "GET" && method !== "POST") return fail(405, "METHOD_NOT_ALLOWED", "Use GET or POST", { Allow: "GET, POST" });
-    return runTool(toolName, () => spec.run(grant.tools));
-  }
-  if (method !== "POST") return fail(405, "METHOD_NOT_ALLOWED", "Use POST", { Allow: "POST" });
+  if (spec.kind === "read") return runTool(toolName, () => spec.run(grant.tools));
 
   const body = await readJsonBody(request);
   if (!body.ok) return body.response;
@@ -118,10 +121,7 @@ function submitVerdict(grant: ToolGrant, raw: unknown): Response {
 type BodyResult = { ok: true; value: unknown } | { ok: false; response: Response };
 
 async function readJsonBody(request: Request): Promise<BodyResult> {
-  const declared = Number(request.headers.get("content-length") ?? "");
-  if (Number.isFinite(declared) && declared > TOOL_BODY_LIMIT_BYTES) return tooLarge();
-
-  const text = await readLimited(request);
+  const text = await readTextLimited(request, TOOL_BODY_LIMIT_BYTES);
   if (text === null) return tooLarge();
   if (!text.trim()) return { ok: false, response: fail(400, "INVALID_REQUEST", "Request body must be a JSON object") };
   try {
@@ -133,29 +133,4 @@ async function readJsonBody(request: Request): Promise<BodyResult> {
 
 function tooLarge(): BodyResult {
   return { ok: false, response: fail(413, "PAYLOAD_TOO_LARGE", `Request body is larger than ${TOOL_BODY_LIMIT_BYTES} bytes`) };
-}
-
-/** Reads the body as text, or null once it passes the size limit. */
-async function readLimited(request: Request): Promise<string | null> {
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > TOOL_BODY_LIMIT_BYTES) {
-      await reader.cancel().catch(() => undefined);
-      return null;
-    }
-    chunks.push(value);
-  }
-  const all = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    all.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(all);
 }

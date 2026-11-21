@@ -13,7 +13,7 @@ import { findIncidentForPayment, openIncident } from "@/lib/incidents";
 import { getLlmStatus, runInvestigation } from "@/lib/investigator";
 import { holdPayment, restrictSession } from "@/lib/policy-gateway";
 import { compareActions } from "@/lib/risk-engine";
-import { getState, nextId, touch } from "@/lib/store";
+import { epochSignal, getState, nextId, touch } from "@/lib/store";
 import { buildInvestigationTools } from "@/lib/tools";
 import type {
   Investigation,
@@ -119,6 +119,8 @@ export function startInvestigation(
   };
 
   const tools = buildInvestigationTools(payment.sessionId, payment.id, epoch);
+  // Aborted by the next reset: the engine stops, its grant ends, no fallback runs.
+  const signal = epochSignal();
 
   const run = (async () => {
     // Let the HTTP response go out first.
@@ -126,7 +128,7 @@ export function startInvestigation(
     let result: InvestigationResult | undefined;
     let failure: unknown;
     try {
-      result = await runInvestigation(ctx, tools, sink);
+      result = await runInvestigation(ctx, tools, sink, { signal });
     } catch (error) {
       failure = error;
     }
@@ -205,8 +207,14 @@ function applyRecommendation(inv: Investigation, recommended: RiskAction): void 
   if (!payment || !session) return;
 
   const stillOpen = payment.status === "HELD" || payment.status === "PENDING_VERIFICATION";
+  // What protects this payment, not the session: a later payment may have restricted the session
+  // while this one still waits for step-up.
   const applied: RiskAction =
-    session.status !== "ACTIVE" ? "HOLD_AND_RESTRICT" : payment.status === "HELD" ? "HOLD" : payment.action;
+    payment.status === "HELD"
+      ? compareActions(payment.action, "HOLD") > 0
+        ? payment.action
+        : "HOLD"
+      : payment.action;
 
   let changed = false;
   if (stillOpen && compareActions(recommended, applied) > 0) {
@@ -224,7 +232,9 @@ function applyRecommendation(inv: Investigation, recommended: RiskAction): void 
       ? `the payment is already ${payment.status}`
       : compareActions(recommended, applied) < 0
         ? `it is weaker than the applied ${applied}; the investigator cannot loosen protection`
-        : `${applied} is already in place`;
+        : compareActions(recommended, applied) > 0 && session.status !== "ACTIVE"
+          ? `the session is already ${session.status}`
+          : `${applied} is already in place`;
     audit({
       actor: "policy-gateway",
       action: "RECOMMENDATION_NOTED",

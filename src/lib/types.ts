@@ -375,6 +375,11 @@ export interface InvestigationResult {
 export interface InvestigatorOptions {
   /** Pause between tool calls in the deterministic fallback, so the timeline animates. */
   stepDelayMs?: number;
+  /**
+   * Aborted when the investigation must stop, for example on a simulator
+   * reset. The engine phase ends (its grant too) and no fallback runs.
+   */
+  signal?: AbortSignal;
 }
 
 /**

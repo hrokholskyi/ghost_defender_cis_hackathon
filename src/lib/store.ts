@@ -175,14 +175,36 @@ export function getState(): BankState {
   return g[GLOBAL_KEY];
 }
 
+const EPOCH_ABORT_KEY = "__ghostLoginDefenderEpochAbort";
+type GlobalWithEpochAbort = typeof globalThis & { [EPOCH_ABORT_KEY]?: AbortController };
+
+function epochController(): AbortController {
+  const g = globalThis as GlobalWithEpochAbort;
+  if (!g[EPOCH_ABORT_KEY]) g[EPOCH_ABORT_KEY] = new AbortController();
+  return g[EPOCH_ABORT_KEY];
+}
+
+/**
+ * Aborted on the next reset. Async work tied to the current state (running
+ * investigations) listens to it, so a reset stops that work instead of
+ * leaving it running against a state that no longer exists.
+ */
+export function epochSignal(): AbortSignal {
+  return epochController().signal;
+}
+
 /** Replaces the store with fresh seed data. The new state has a higher epoch and seq. */
 export function resetState(startAt: ISODateTime = DEFAULT_START_AT): BankState {
-  const g = globalThis as GlobalWithStore;
+  const g = globalThis as GlobalWithStore & GlobalWithEpochAbort;
   const previous = g[GLOBAL_KEY];
   const next = seedState((previous?.epoch ?? 0) + 1, startAt);
   // seq keeps increasing across resets so pollers always see a change.
   next.seq = (previous?.seq ?? 0) + 1;
   g[GLOBAL_KEY] = next;
+  // Abort after the swap: anything that reacts already sees the new epoch.
+  const ending = epochController();
+  g[EPOCH_ABORT_KEY] = new AbortController();
+  ending.abort(new Error("The simulator was reset"));
   return next;
 }
 

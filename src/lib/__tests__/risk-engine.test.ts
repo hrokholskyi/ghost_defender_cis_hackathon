@@ -184,6 +184,27 @@ describe("risk engine totals and rules", () => {
     expect(rapid("2026-03-15T02:11:00+04:00")).not.toContain("RAPID_SEQUENCE");
   });
 
+  it("compares the exact time against the windows, not rounded minutes", () => {
+    const swap = (swappedAt: string) => ids(baseFacts({ sim: { swapConfirmed: true, swappedAt } }));
+    expect(swap("2026-03-15T01:00:00+04:00")).toEqual(["RECENT_SIM_SWAP"]); // exactly 60 min
+    expect(swap("2026-03-15T00:59:59+04:00")).toEqual([]); // 60 min 1 s
+    expect(swap("2026-03-15T00:59:31+04:00")).toEqual([]); // 60 min 29 s, rounds to 60
+    expect(swap("2026-03-15T02:00:00+04:00")).toEqual(["RECENT_SIM_SWAP"]); // at login
+
+    const rapid = (requestedAt: string) =>
+      ids(
+        baseFacts({
+          beneficiariesAddedInSession: [{ name: "Orion", createdAt: LOGIN }],
+          payment: { ...knownPayment, beneficiarySettledCount: 0, beneficiaryCreatedInSession: true, requestedAt },
+        }),
+      );
+    expect(rapid("2026-03-15T02:10:00+04:00")).toContain("RAPID_SEQUENCE"); // exactly 10 min
+    expect(rapid("2026-03-15T02:10:01+04:00")).not.toContain("RAPID_SEQUENCE"); // 10 min 1 s
+    expect(rapid("2026-03-15T02:10:29+04:00")).not.toContain("RAPID_SEQUENCE"); // 10 min 29 s, rounds to 10
+    expect(rapid("2026-03-15T02:00:00+04:00")).toContain("RAPID_SEQUENCE"); // at login
+    expect(rapid("2026-03-15T01:59:59+04:00")).not.toContain("RAPID_SEQUENCE"); // before login
+  });
+
   it("keeps signals sticky with their first detection time", () => {
     const first = assessRisk(
       baseFacts({ payment: { ...knownPayment, amount: 85000 } }),

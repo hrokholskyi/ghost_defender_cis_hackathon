@@ -267,6 +267,10 @@ export function assertFunds(amount: number): void {
 /** Debits the account and marks the payment SETTLED. The only place where money leaves. */
 export function debitAndSettle(payment: Payment, actor: Actor, reason: string): Payment {
   const state = getState();
+  const fils = Math.round(payment.amount * 100);
+  if (!Number.isFinite(payment.amount) || fils < 1 || Math.abs(payment.amount * 100 - fils) > 1e-6) {
+    throw new DomainError("INVALID_REQUEST", `Amount ${payment.amount} is not a positive whole number of fils`);
+  }
   assertFunds(payment.amount);
   const at = now();
   state.customer.balance = Math.round((state.customer.balance - payment.amount) * 100) / 100;

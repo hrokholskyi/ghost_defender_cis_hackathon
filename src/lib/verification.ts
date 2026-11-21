@@ -32,9 +32,13 @@ import type {
 } from "@/lib/types";
 import { parseIso } from "@/lib/time";
 
-/** Most recent ACTIVE session on a trusted device, or null. */
-export function findTrustedTargetSession(): Session | null {
-  const candidates = getState().sessions.filter(isTrustedActiveSession);
+/**
+ * Most recent ACTIVE session on a trusted device, other than the session that
+ * requested the payment, or null. The requesting session is never asked to
+ * confirm its own payment, even when it runs on a trusted device.
+ */
+export function findTrustedTargetSession(requestingSessionId: string): Session | null {
+  const candidates = getState().sessions.filter((s) => s.id !== requestingSessionId && isTrustedActiveSession(s));
   if (candidates.length === 0) return null;
   return candidates.reduce((latest, s) => (parseIso(s.createdAt) > parseIso(latest.createdAt) ? s : latest));
 }
@@ -42,7 +46,7 @@ export function findTrustedTargetSession(): Session | null {
 /** Creates the verification request for a HELD or PENDING_VERIFICATION payment. */
 export function createVerification(payment: Payment, beneficiaryName: string): VerificationRequest {
   const state = getState();
-  const target = findTrustedTargetSession();
+  const target = findTrustedTargetSession(payment.sessionId);
   const device = target ? findDevice(target.deviceId) : undefined;
   const verification: VerificationRequest = {
     id: nextId("ver"),
@@ -72,11 +76,60 @@ export function createVerification(payment: Payment, beneficiaryName: string): V
       action: "VERIFICATION_UNDELIVERABLE",
       sessionId: payment.sessionId,
       paymentId: payment.id,
-      detail: "No active session on a trusted device. The payment stays held until the customer is reached",
+      detail: "No other active session on a trusted device. The payment stays held until the customer is reached",
       data: { verificationId: verification.id },
     });
   }
   return verification;
+}
+
+/**
+ * After a DENY, every other open payment of the suspicious session is part of
+ * the same takeover: cancel it through the Policy Gateway, close its
+ * verifications as DENIED and confirm its incident. Runs while `denied` is
+ * still PENDING, because the proof refers to it.
+ */
+function closeOtherOpenPayments(denied: VerificationRequest, proof: TrustedSessionProof): void {
+  const state = getState();
+  const others = state.payments.filter(
+    (p) =>
+      p.id !== denied.paymentId &&
+      p.sessionId === denied.suspiciousSessionId &&
+      (p.status === "HELD" || p.status === "PENDING_VERIFICATION"),
+  );
+  for (const other of others) {
+    if (!cancelPayment("customer-verification", other.id, proof).changed) continue;
+    const at = now();
+    for (const v of state.verifications) {
+      if (v.paymentId !== other.id || (v.status !== "PENDING" && v.status !== "UNDELIVERABLE")) continue;
+      v.status = "DENIED";
+      v.respondedAt = at;
+      touch();
+      audit({
+        actor: "customer-verification",
+        action: "VERIFICATION_DENIED",
+        sessionId: other.sessionId,
+        paymentId: other.id,
+        detail: `${v.id} closed as denied: the customer denied ${denied.id} for the same session on a trusted device`,
+        data: { verificationId: v.id, deniedVerificationId: denied.id },
+      });
+    }
+    const incident =
+      findIncidentForPayment(other.id) ??
+      openIncident("customer-verification", other.sessionId, other.id, {
+        title: "Account takeover reported by the customer",
+        severity: other.riskLevel,
+        reasons: [...other.reasons],
+      });
+    if (incident.status === "OPEN") {
+      resolveIncident(
+        "customer-verification",
+        incident,
+        "CONFIRMED_ATO",
+        `The customer denied ${denied.paymentId} from the same session on a trusted device. Account takeover confirmed`,
+      );
+    }
+  }
 }
 
 export function respondToVerification(
@@ -129,6 +182,7 @@ export function respondToVerification(
       "CONFIRMED_ATO",
       "The customer denied the payment on a trusted device. Account takeover confirmed",
     );
+    closeOtherOpenPayments(verification, proof);
     audit({
       actor: "bank-simulator",
       action: "SECURE_RECOVERY_STARTED",

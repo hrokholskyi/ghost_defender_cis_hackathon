@@ -1,12 +1,24 @@
 /** Input validation for the public API. */
 import { z } from "zod";
 import { DomainError } from "@/lib/errors";
+import { isValidIso } from "@/lib/time";
 
-const isoDateTime = z
-  .string()
-  .refine((s) => /^\d{4}-\d{2}-\d{2}T/.test(s) && !Number.isNaN(Date.parse(s)), {
-    message: "Expected an ISO 8601 date-time",
-  });
+/** Strict ISO 8601 date-time with Z or an offset, between the years 2000 and 2099. */
+export const isoDateTime = z.string().max(40).refine(isValidIso, {
+  message: "Expected an ISO 8601 date-time such as 2026-03-15T09:00:00+04:00, between the years 2000 and 2099",
+});
+
+/** Amounts are whole fils (multiples of 0.01). Float noise such as 0.1 + 0.2 is rounded to the cent. */
+const MAX_TRANSFER_AMOUNT = 10_000_000;
+const amount = z
+  .number()
+  .finite()
+  .positive()
+  .max(MAX_TRANSFER_AMOUNT)
+  .refine((n) => Math.abs(n * 100 - Math.round(n * 100)) < 1e-6 && Math.round(n * 100) >= 1, {
+    message: "Expected an amount in whole fils (a multiple of 0.01)",
+  })
+  .transform((n) => Math.round(n * 100) / 100);
 
 export const networkSchema = z.object({
   ip: z.string().min(1).max(64),
@@ -41,7 +53,7 @@ export const addBeneficiarySchema = z.object({
 
 export const transferSchema = z.object({
   beneficiaryId: z.string().min(1).max(64),
-  amount: z.number().positive().finite().max(10_000_000),
+  amount,
   at: isoDateTime.optional(),
 });
 

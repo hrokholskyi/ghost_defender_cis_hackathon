@@ -18,7 +18,7 @@ import { startInvestigation } from "@/lib/investigations";
 import { holdPayment, restrictSession } from "@/lib/policy-gateway";
 import { parseInput, transferSchema } from "@/lib/schemas";
 import { getState, nextId, touch } from "@/lib/store";
-import { isValidIso } from "@/lib/time";
+import type { z } from "zod";
 import type { Payment, PaymentResponse, RiskAssessment, Session } from "@/lib/types";
 import { createVerification } from "@/lib/verification";
 
@@ -26,15 +26,24 @@ function baseReasons(risk: RiskAssessment): string[] {
   return risk.signals.map((s) => `${s.label}: ${s.evidence} (+${s.points})`);
 }
 
+/** One field of the raw body, checked with its transfer schema, or undefined when absent or invalid. */
+function validField<K extends keyof typeof transferSchema.shape>(raw: unknown, key: K) {
+  const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>)[key] : undefined;
+  if (value === undefined) return undefined;
+  const parsed = transferSchema.shape[key].safeParse(value);
+  return parsed.success ? (parsed.data as z.output<(typeof transferSchema.shape)[K]>) : undefined;
+}
+
 function recordRejected(session: Session, raw: unknown, reason: string): Payment {
-  const input = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const risk = getState().risk[session.id];
   const at = now();
+  const beneficiaryId = validField(raw, "beneficiaryId");
   const payment: Payment = {
     id: nextId("pay"),
     sessionId: session.id,
-    beneficiaryId: typeof input.beneficiaryId === "string" ? input.beneficiaryId : "",
-    amount: typeof input.amount === "number" && Number.isFinite(input.amount) ? input.amount : 0,
+    // Only validated values are stored; anything else is dropped.
+    beneficiaryId: beneficiaryId && findBeneficiary(beneficiaryId) ? beneficiaryId : "",
+    amount: validField(raw, "amount") ?? 0,
     currency: "AED",
     status: "REJECTED",
     requestedAt: at,
@@ -52,7 +61,7 @@ function recordRejected(session: Session, raw: unknown, reason: string): Payment
     action: "PAYMENT_REJECTED",
     sessionId: session.id,
     paymentId: payment.id,
-    detail: `Transfer of ${formatAed(payment.amount)} refused: ${reason}`,
+    detail: payment.amount > 0 ? `Transfer of ${formatAed(payment.amount)} refused: ${reason}` : `Transfer refused: ${reason}`,
   });
   return payment;
 }
@@ -61,10 +70,11 @@ function recordRejected(session: Session, raw: unknown, reason: string): Payment
 export function requestTransfer(token: string | null, raw: unknown): PaymentResponse {
   const session = authenticate(token);
   const state = getState();
-  const rawAt = raw && typeof raw === "object" ? (raw as { at?: unknown }).at : undefined;
-  if (isValidIso(rawAt)) advanceClock(rawAt);
 
   if (session.status === "RESTRICTED" || session.status === "REVOKED") {
+    // The body is not validated as a whole here, so the clock only moves for an `at` that passes its own schema.
+    const at = validField(raw, "at");
+    if (at !== undefined) advanceClock(at);
     const code = session.status === "RESTRICTED" ? "SESSION_RESTRICTED" : "SESSION_REVOKED";
     const reason = `session ${session.id} is ${session.status}`;
     recordRejected(session, raw, reason);
@@ -72,6 +82,7 @@ export function requestTransfer(token: string | null, raw: unknown): PaymentResp
   }
 
   const input = parseInput(transferSchema, raw);
+  advanceClock(input.at);
   const beneficiary = findBeneficiary(input.beneficiaryId);
   if (!beneficiary) throw new DomainError("NOT_FOUND", `Beneficiary ${input.beneficiaryId} not found`);
 

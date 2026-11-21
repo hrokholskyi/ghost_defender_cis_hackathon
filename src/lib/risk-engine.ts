@@ -24,6 +24,8 @@ import {
   type RiskSignalId,
 } from "@/lib/types";
 
+const MINUTE_MS = 60_000;
+
 export interface RiskPaymentFacts {
   amount: number;
   beneficiaryName: string;
@@ -97,10 +99,11 @@ export function evaluateSignals(facts: RiskFacts): Partial<Record<RiskSignalId, 
     fired.UNKNOWN_DEVICE = `Login from ${facts.device.label} (${facts.device.platform}), not in the customer's device history`;
   }
 
+  // Windows compare exact milliseconds; rounded minutes are for the evidence text only.
   if (facts.sim.swapConfirmed && facts.sim.swappedAt) {
+    const sinceSwapMs = parseIso(facts.loginAt) - parseIso(facts.sim.swappedAt);
     const minutes = minutesBetween(facts.sim.swappedAt, facts.loginAt);
-    const swapBeforeLogin = parseIso(facts.sim.swappedAt) <= parseIso(facts.loginAt);
-    if (swapBeforeLogin && minutes <= SIM_SWAP_WINDOW_MINUTES) {
+    if (sinceSwapMs >= 0 && sinceSwapMs <= SIM_SWAP_WINDOW_MINUTES * MINUTE_MS) {
       fired.RECENT_SIM_SWAP = `SIM swapped at ${clockLabel(facts.sim.swappedAt)}, ${minutes} min before login at ${clockLabel(facts.loginAt)}`;
     }
   }
@@ -123,8 +126,9 @@ export function evaluateSignals(facts: RiskFacts): Partial<Record<RiskSignalId, 
   }
 
   if (payment && payment.beneficiaryCreatedInSession) {
+    const sinceLoginMs = parseIso(payment.requestedAt) - parseIso(facts.loginAt);
     const minutes = minutesBetween(facts.loginAt, payment.requestedAt);
-    if (minutes >= 0 && minutes <= RAPID_SEQUENCE_WINDOW_MINUTES) {
+    if (sinceLoginMs >= 0 && sinceLoginMs <= RAPID_SEQUENCE_WINDOW_MINUTES * MINUTE_MS) {
       fired.RAPID_SEQUENCE = `Transfer ${minutes} min after login, to a beneficiary added in this same session`;
     }
   }

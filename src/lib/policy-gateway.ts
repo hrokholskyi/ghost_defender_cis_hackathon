@@ -87,10 +87,12 @@ function permitted(actor: Actor, operation: PolicyOperation): boolean {
 
 /**
  * Validates the proof against the store: a PENDING verification whose target
- * is the answering session, which must be ACTIVE and on a trusted device.
- * The verification must concern the payment or session being changed.
+ * is the answering session, which must be ACTIVE, on a trusted device and not
+ * the suspicious session itself. The verification must concern the payment or
+ * session being changed. A DENY may cancel every open payment of the
+ * suspicious session, so CANCEL_PAYMENT also accepts a payment of that session.
  */
-function checkProof(proof: TrustedSessionProof | undefined, target: Target): string | null {
+function checkProof(operation: PolicyOperation, proof: TrustedSessionProof | undefined, target: Target): string | null {
   if (!proof) return "no proof of a trusted session";
   const verification = getState().verifications.find((v) => v.id === proof.verificationId);
   if (!verification) return `verification ${proof.verificationId} not found`;
@@ -98,10 +100,15 @@ function checkProof(proof: TrustedSessionProof | undefined, target: Target): str
   if (verification.targetSessionId === null || verification.targetSessionId !== proof.sessionId) {
     return `session ${proof.sessionId} is not the target of verification ${verification.id}`;
   }
+  if (proof.sessionId === verification.suspiciousSessionId) {
+    return `session ${proof.sessionId} requested the payment and cannot verify it`;
+  }
   const session = findSession(proof.sessionId);
   if (!session || session.status !== "ACTIVE") return `session ${proof.sessionId} is not active`;
   if (findDevice(session.deviceId)?.trusted !== true) return `session ${proof.sessionId} is not on a trusted device`;
-  if (target.paymentId && verification.paymentId !== target.paymentId) {
+  const sameSessionCancel =
+    operation === "CANCEL_PAYMENT" && target.sessionId !== undefined && target.sessionId === verification.suspiciousSessionId;
+  if (target.paymentId && verification.paymentId !== target.paymentId && !sameSessionCancel) {
     return `verification ${verification.id} does not cover payment ${target.paymentId}`;
   }
   if (!target.paymentId && target.sessionId && verification.suspiciousSessionId !== target.sessionId) {
@@ -120,7 +127,7 @@ function authorize(
     return deny(actor, operation, target, `${actor} is not allowed to ${operation.toLowerCase().replace("_", " ")}`);
   }
   if (LOOSENING_ACTORS.includes(actor)) {
-    const problem = checkProof(proof, target);
+    const problem = checkProof(operation, proof, target);
     if (problem) return deny(actor, operation, target, problem);
   }
   return null;

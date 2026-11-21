@@ -8,8 +8,20 @@ export function parseIso(value: ISODateTime): number {
   return ms;
 }
 
+/** Simulated time stays in [2000-01-01, 2100-01-01). Outside it, formatting and the demo make no sense. */
+export const MIN_SIM_TIME_MS = Date.UTC(2000, 0, 1);
+export const MAX_SIM_TIME_MS = Date.UTC(2100, 0, 1);
+
+export function isSimTimeInRange(ms: number): boolean {
+  return Number.isFinite(ms) && ms >= MIN_SIM_TIME_MS && ms < MAX_SIM_TIME_MS;
+}
+
+/** `YYYY-MM-DDTHH:mm[:ss[.sss]]` with `Z` or a `±HH:mm` offset. */
+const STRICT_ISO = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d{1,3})?)?(Z|[+-]([01]\d|2[0-3]):[0-5]\d)$/;
+
+/** A strict ISO 8601 date-time inside the simulated time range. */
 export function isValidIso(value: unknown): value is ISODateTime {
-  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+  return typeof value === "string" && STRICT_ISO.test(value) && isSimTimeInRange(Date.parse(value));
 }
 
 /** Formats epoch milliseconds as `YYYY-MM-DDTHH:mm:ss+04:00`. */

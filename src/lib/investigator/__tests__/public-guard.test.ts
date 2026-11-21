@@ -18,6 +18,29 @@ describe("public-exposure guard", () => {
     expect(publicGuardDecision(ENV, at("/api/state", `${PUBLIC}:443`))).toBe("block");
   });
 
+  it("compares hostnames only: any port, trailing dots and case do not escape the guard", () => {
+    for (const host of [
+      `${PUBLIC}:8443`,
+      `${PUBLIC}:2053`,
+      `${PUBLIC}.`,
+      `${PUBLIC}.:443`,
+      `${PUBLIC}.:8443`,
+      PUBLIC.toUpperCase(),
+      `${PUBLIC.toUpperCase()}:2096`,
+    ]) {
+      expect(publicGuardDecision(ENV, at("/api/state", host)), host).toBe("block");
+      expect(publicGuardDecision(ENV, at("/api/investigations/tools/get_sim_status", host)), host).toBe("allow");
+    }
+    expect(publicGuardDecision(ENV, at("/api/state", "localhost:3000", `${PUBLIC}:8443`))).toBe("block");
+    expect(publicGuardDecision(ENV, at("/api/state", "localhost:3000", `proxy.internal, ${PUBLIC}.:2087`))).toBe("block");
+    // A public URL with a port still matches the bare hostname.
+    expect(publicGuardDecision({ GLD_PUBLIC_URL: `https://${PUBLIC}:8443/` }, at("/api/state", PUBLIC))).toBe("block");
+    expect(publicGuardDecision(ENV, at("/api/state", "localhost:3000"))).toBe("allow");
+    expect(publicGuardDecision(ENV, at("/api/state", "localhost:8443"))).toBe("allow");
+    expect(publicGuardDecision(ENV, at("/api/state", "[::1]:3000"))).toBe("allow");
+    expect(publicGuardDecision(ENV, at("/api/state", `other.${PUBLIC}:8443`))).toBe("allow");
+  });
+
   it("leaves localhost and other hosts untouched", () => {
     for (const path of ["/api/state", "/", "/api/payments"]) {
       expect(publicGuardDecision(ENV, at(path, "localhost:3000"))).toBe("allow");
@@ -40,6 +63,7 @@ describe("public-exposure guard", () => {
   it("does not block anything without GLD_PUBLIC_URL", () => {
     expect(publicGuardDecision({}, at("/api/state", PUBLIC))).toBe("allow");
     expect(publicGuardDecision({ GLD_PUBLIC_URL: "  " }, at("/api/state", PUBLIC))).toBe("allow");
+    expect(publicGuardDecision({ GLD_PUBLIC_URL: "not a url" }, at("/api/state", PUBLIC))).toBe("allow");
   });
 
   it("proxy answers 404 on the public host and passes through elsewhere", async () => {

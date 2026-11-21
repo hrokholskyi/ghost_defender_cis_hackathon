@@ -6,7 +6,8 @@
  * When clock.capMs is set (a scenario waits for its next step), now() never exceeds it.
  */
 import { getState } from "@/lib/store";
-import { formatIso, parseIso } from "@/lib/time";
+import { DomainError } from "@/lib/errors";
+import { formatIso, isSimTimeInRange } from "@/lib/time";
 import type { ISODateTime } from "@/lib/types";
 
 export function nowMs(): number {
@@ -19,10 +20,19 @@ export function now(): ISODateTime {
   return formatIso(nowMs());
 }
 
+/** Epoch ms of `at`. Throws a 400 for an unparseable or out-of-range value, so the clock never leaves the simulated range. */
+function checkedTarget(at: ISODateTime): number {
+  const ms = Date.parse(at);
+  if (!isSimTimeInRange(ms)) {
+    throw new DomainError("INVALID_REQUEST", `Timestamp out of the simulated range (years 2000 to 2099): ${String(at).slice(0, 40)}`);
+  }
+  return ms;
+}
+
 /** Moves the simulated clock forward to `at` when it is later than now. Returns now(). */
 export function advanceClock(at?: ISODateTime): ISODateTime {
   if (at !== undefined) {
-    const target = parseIso(at);
+    const target = checkedTarget(at);
     if (target > nowMs()) {
       const state = getState();
       state.clock = { simulatedMs: target, realMs: Date.now(), capMs: state.clock.capMs };
@@ -33,7 +43,7 @@ export function advanceClock(at?: ISODateTime): ISODateTime {
 
 /** Sets the clock to an exact time, also backwards. Only for resets and scenario setup. */
 export function setClock(at: ISODateTime): void {
-  getState().clock = { simulatedMs: parseIso(at), realMs: Date.now(), capMs: null };
+  getState().clock = { simulatedMs: checkedTarget(at), realMs: Date.now(), capMs: null };
 }
 
 /** Caps now() at `ms`, or removes the cap with null. */

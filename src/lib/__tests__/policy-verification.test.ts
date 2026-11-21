@@ -9,7 +9,10 @@ import {
   restrictSession,
   revokeSession,
 } from "@/lib/policy-gateway";
+import { addBeneficiary, login, reportSimSwap } from "@/lib/bank";
+import { requestTransfer } from "@/lib/payment-gateway";
 import { getSnapshot } from "@/lib/snapshot";
+import { getState } from "@/lib/store";
 import { respondToVerification } from "@/lib/verification";
 import { attackerSession, auditActions, freshStore, iphoneSession, runScenario } from "./helpers";
 
@@ -138,5 +141,119 @@ describe("verification on the trusted device", () => {
     expect(s.sessions.find((x) => x.id === attacker.id)?.status).toBe("ACTIVE");
     expect(s.incidents.find((i) => i.paymentId === payment.id)?.status).toBe("RESOLVED_LEGITIMATE");
     expect(s.beneficiaries.find((b) => b.id === payment.beneficiaryId)?.settledPaymentCount).toBe(1);
+  });
+});
+
+describe("verification never goes to the session that asked for the payment", () => {
+  const HOME = { ip: "10.0.0.2", city: "Dubai", country: "AE" };
+  const ABROAD = { ip: "203.0.113.9", city: "London", country: "GB" };
+
+  /** SIM swap 08:40, login from the trusted iPhone abroad 09:01, new beneficiary, AED 5,000 at 09:03: risk 65, HOLD. */
+  function trustedDeviceTakeover(withOlderIphoneSession: boolean) {
+    const older = withOlderIphoneSession
+      ? login({ deviceId: "dev-iphone", network: HOME, at: "2026-03-15T09:00:00+04:00" }).session
+      : undefined;
+    reportSimSwap({ swappedAt: "2026-03-15T08:40:00+04:00", at: "2026-03-15T09:00:30+04:00" });
+    const suspicious = login({ deviceId: "dev-iphone", network: ABROAD, at: "2026-03-15T09:01:00+04:00" }).session;
+    const { beneficiary } = addBeneficiary(suspicious.token, {
+      name: "Fast Cash FZE",
+      iban: "AE00 DEMO 9999 0000 0000 001",
+      at: "2026-03-15T09:02:00+04:00",
+    });
+    const paid = requestTransfer(suspicious.token, { beneficiaryId: beneficiary.id, amount: 5000, at: "2026-03-15T09:03:00+04:00" });
+    const verification = getSnapshot().verifications.find((v) => v.paymentId === paid.payment.id)!;
+    return { older, suspicious, paid, verification };
+  }
+
+  it("is UNDELIVERABLE when the only trusted session is the suspicious one, and the payment stays held", async () => {
+    const { suspicious, paid, verification } = trustedDeviceTakeover(false);
+    expect(paid.risk.score).toBe(65);
+    expect(paid.payment.status).toBe("HELD");
+    expect(verification.status).toBe("UNDELIVERABLE");
+    expect(verification.targetSessionId).toBeNull();
+
+    let error: unknown;
+    try {
+      respondToVerification(suspicious.token, verification.id, { response: "CONFIRM" });
+    } catch (e) {
+      error = e;
+    }
+    expect((error as DomainError).code).toBe("NOT_TRUSTED_CHANNEL");
+    await whenIdle();
+    const s = getSnapshot();
+    expect(s.payments.find((p) => p.id === paid.payment.id)?.status).toBe("HELD");
+    expect(s.customer.balance).toBe(92000);
+  });
+
+  it("targets another trusted session when there is one", async () => {
+    const { older, suspicious, verification } = trustedDeviceTakeover(true);
+    expect(verification.status).toBe("PENDING");
+    expect(verification.targetSessionId).toBe(older!.id);
+    expect(verification.targetSessionId).not.toBe(suspicious.id);
+    await whenIdle();
+  });
+
+  it("the policy gateway refuses a proof from the suspicious session itself", async () => {
+    const { suspicious, paid, verification } = trustedDeviceTakeover(false);
+    // Forge a verification that targets the suspicious session, as the old code did.
+    const stored = getState().verifications.find((v) => v.id === verification.id)!;
+    stored.status = "PENDING";
+    stored.targetSessionId = suspicious.id;
+    stored.targetDeviceId = suspicious.deviceId;
+    const proof = { verificationId: verification.id, sessionId: suspicious.id };
+    expect(releasePayment("customer-verification", paid.payment.id, proof).allowed).toBe(false);
+    expect(cancelPayment("customer-verification", paid.payment.id, proof).allowed).toBe(false);
+    expect(getSnapshot().payments.find((p) => p.id === paid.payment.id)?.status).toBe("HELD");
+    await whenIdle();
+  });
+});
+
+describe("DENY closes every open payment of the suspicious session", () => {
+  it("cancels the other held payments, denies their verifications and confirms their incidents", async () => {
+    const iphone = login({
+      deviceId: "dev-iphone",
+      network: { ip: "10.0.0.2", city: "Dubai", country: "AE" },
+      at: "2026-03-15T09:50:00+04:00",
+    }).session;
+    const attacker = login({
+      deviceId: "dev-android-x",
+      device: { label: "Samsung Galaxy A54", platform: "Android" },
+      network: { ip: "10.88.14.207", city: "Dubai", country: "AE" },
+      at: "2026-03-15T10:00:00+04:00",
+    }).session;
+    reportSimSwap({ swappedAt: "2026-03-15T09:30:00+04:00", at: "2026-03-15T10:01:00+04:00" });
+    const first = requestTransfer(attacker.token, { beneficiaryId: "ben-alnoor", amount: 20000, at: "2026-03-15T10:05:00+04:00" });
+    const second = requestTransfer(attacker.token, { beneficiaryId: "ben-alnoor", amount: 20000, at: "2026-03-15T10:06:00+04:00" });
+    expect(first.payment.status).toBe("HELD");
+    expect(second.payment.status).toBe("HELD");
+    await whenIdle();
+
+    let s = getSnapshot();
+    const v1 = s.verifications.find((v) => v.paymentId === first.payment.id)!;
+    const v2 = s.verifications.find((v) => v.paymentId === second.payment.id)!;
+    expect(v1.targetSessionId).toBe(iphone.id);
+
+    respondToVerification(iphone.token, v1.id, { response: "DENY" });
+    await whenIdle();
+    s = getSnapshot();
+    expect(s.sessions.find((x) => x.id === attacker.id)?.status).toBe("REVOKED");
+    for (const id of [first.payment.id, second.payment.id]) {
+      expect(s.payments.find((p) => p.id === id)?.status, id).toBe("CANCELLED");
+      expect(s.incidents.find((i) => i.paymentId === id)?.status, id).toBe("CONFIRMED_ATO");
+    }
+    expect(s.verifications.find((v) => v.id === v2.id)?.status).toBe("DENIED");
+    const secondAudit = s.audit.filter((e) => e.paymentId === second.payment.id).map((e) => e.action);
+    expect(secondAudit).toEqual(expect.arrayContaining(["PAYMENT_CANCELLED", "INCIDENT_CONFIRMED_ATO", "VERIFICATION_DENIED"]));
+
+    let error: unknown;
+    try {
+      respondToVerification(iphone.token, v2.id, { response: "CONFIRM" });
+    } catch (e) {
+      error = e;
+    }
+    expect((error as DomainError).code).toBe("CONFLICT");
+    s = getSnapshot();
+    expect(s.payments.find((p) => p.id === second.payment.id)?.status).toBe("CANCELLED");
+    expect(s.customer.balance).toBe(92000);
   });
 });

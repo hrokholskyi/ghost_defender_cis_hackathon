@@ -18,10 +18,13 @@ export async function runFallback(
   tools: InvestigationTools,
   recorder: StepRecorder,
   stepDelayMs: number,
+  signal?: AbortSignal,
 ): Promise<InvestigationVerdict> {
   for (const tool of READ_TOOLS) {
+    signal?.throwIfAborted();
     if (recorder.reads[tool] === undefined) await recorder.read(tools, tool, stepDelayMs);
   }
+  signal?.throwIfAborted();
 
   const evidence = buildEvidence(ctx, recorder.reads);
   const recommendedAction = ctx.risk.action;

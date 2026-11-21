@@ -51,6 +51,8 @@ export class StepRecorder {
     private readonly ctx: InvestigationContext,
     private readonly sink: InvestigationSink,
     private readonly toolTimeoutMs: number,
+    /** Once aborted, no tool runs and nothing is reported any more. */
+    private readonly signal?: AbortSignal,
   ) {}
 
   private nextId(): string {
@@ -76,6 +78,7 @@ export class StepRecorder {
     run: () => Promise<T>,
     delayMs = 0,
   ): Promise<CallOutcome<T>> {
+    if (this.signal?.aborted) return { ok: false, error: CANCELLED };
     const started: InvestigationStep = {
       kind: "tool_call",
       id: this.nextId(),
@@ -85,7 +88,8 @@ export class StepRecorder {
       startedAt: this.sink.now(),
     };
     safely(() => this.sink.stepStarted(started));
-    if (delayMs > 0) await sleep(delayMs);
+    if (delayMs > 0) await sleep(delayMs, this.signal);
+    if (this.signal?.aborted) return { ok: false, error: CANCELLED };
 
     let outcome: CallOutcome<T>;
     try {
@@ -166,8 +170,20 @@ export function trackedTools(
   };
 }
 
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+export const CANCELLED = "Investigation cancelled";
+
+/** Resolves after `ms`, or as soon as `signal` aborts. Never rejects. */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+  });
 }
 
 export function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {

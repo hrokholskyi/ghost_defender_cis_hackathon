@@ -35,6 +35,20 @@ async function body(res: Response) {
   return (await res.json()) as Record<string, unknown>;
 }
 
+describe("Devin tool endpoint - method check", () => {
+  it("answers 405 for a wrong method without counting the call against the cap", async () => {
+    const g = grant({ maxCalls: 2 });
+    for (let i = 0; i < 5; i++) {
+      expect((await callTool("get_sim_status", g.token, undefined, "DELETE")).status).toBe(405);
+      expect((await callTool("submit_verdict", g.token, undefined, "GET")).status).toBe(405);
+    }
+    expect(g.grant.callCount).toBe(0);
+    expect((await callTool("get_sim_status", g.token)).status).toBe(200);
+    expect((await callTool("check_beneficiary", g.token)).status).toBe(200);
+    expect((await callTool("get_device_history", g.token)).status).toBe(429);
+  });
+});
+
 describe("Devin tool endpoint", () => {
   it("runs a read tool for a valid token and returns its result", async () => {
     const g = grant();

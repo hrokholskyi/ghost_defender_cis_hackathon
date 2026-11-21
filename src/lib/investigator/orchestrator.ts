@@ -48,9 +48,11 @@ export function createInvestigator(options: CreateInvestigatorOptions = {}): Run
 
   return async (ctx, tools, sink, runOptions) => {
     const env = options.env ?? process.env;
+    const signal = runOptions?.signal;
     try {
+      if (signal?.aborted) return cancelled(ctx, signal);
       const stepDelayMs = resolveStepDelay(env, runOptions?.stepDelayMs);
-      const recorder = new StepRecorder(ctx, sink, toolTimeoutMs);
+      const recorder = new StepRecorder(ctx, sink, toolTimeoutMs, signal);
 
       let fallbackReason: string;
       if (isFallbackForced(env)) {
@@ -59,15 +61,19 @@ export function createInvestigator(options: CreateInvestigatorOptions = {}): Run
         fallbackReason = options.noEngineReason ?? NO_ENGINE_REASON;
       } else {
         sink.engineSelected({ engine: engine.id, model: engine.model });
-        const outcome = await runEngine(engine, ctx, tools, recorder, engineTimeoutMs);
+        const outcome = await runEngine(engine, ctx, tools, recorder, engineTimeoutMs, signal);
+        // An aborted investigation ends here: no fallback against stale tools.
+        if (signal?.aborted) return cancelled(ctx, signal);
         if (outcome.ok) return { engine: engine.id, model: engine.model, verdict: outcome.verdict };
         fallbackReason = outcome.reason;
       }
 
       sink.engineSelected({ engine: "deterministic-fallback", fallbackReason });
-      const verdict = await runFallback(ctx, tools, recorder, stepDelayMs);
+      const verdict = await runFallback(ctx, tools, recorder, stepDelayMs, signal);
+      if (signal?.aborted) return cancelled(ctx, signal);
       return { engine: "deterministic-fallback", fallbackReason, verdict };
     } catch (err) {
+      if (signal?.aborted) return cancelled(ctx, signal);
       return lastResort(ctx, sink, err);
     }
   };
@@ -79,6 +85,7 @@ async function runEngine(
   tools: InvestigationTools,
   recorder: StepRecorder,
   timeoutMs: number,
+  external: AbortSignal | undefined,
 ): Promise<EngineOutcome> {
   const label = engineLabel(engine);
   const controller = new AbortController();
@@ -95,6 +102,22 @@ async function runEngine(
     }, timeoutMs);
   });
 
+  // An external abort (a reset) ends the engine phase at once, whatever the engine does.
+  let stopListening: () => void = () => undefined;
+  const cancel = new Promise<never>((_, reject) => {
+    if (!external) return;
+    const onAbort = () => {
+      controller.abort(external.reason ?? new Error("Investigation cancelled"));
+      reject(new Error("investigation cancelled"));
+    };
+    if (external.aborted) onAbort();
+    else {
+      external.addEventListener("abort", onAbort, { once: true });
+      stopListening = () => external.removeEventListener("abort", onAbort);
+    }
+  });
+  cancel.catch(() => undefined);
+
   let raw: unknown;
   try {
     const run = Promise.resolve().then(() =>
@@ -107,7 +130,7 @@ async function runEngine(
         signal: controller.signal,
       }),
     );
-    raw = await Promise.race([run, cap]);
+    raw = await Promise.race([run, cap, cancel]);
   } catch (err) {
     return {
       ok: false,
@@ -118,6 +141,7 @@ async function runEngine(
   } finally {
     open = false;
     clearTimeout(timer);
+    stopListening();
     if (!controller.signal.aborted) controller.abort(new Error(`${label} phase ended`));
   }
 
@@ -144,6 +168,24 @@ async function runEngine(
       evidence: submitted.evidence.map(plainDashes),
       recommendedAction: submitted.recommendedAction,
       incidentId: recorder.incident?.id,
+    },
+  };
+}
+
+/**
+ * Result for an aborted investigation. Uses no tools and no sink: the caller
+ * discards it, because the state it belonged to is gone.
+ */
+function cancelled(ctx: InvestigationContext, signal: AbortSignal): InvestigationResult {
+  const fallbackReason = `Investigation cancelled: ${errorMessage(signal.reason ?? "aborted")}`;
+  return {
+    engine: "deterministic-fallback",
+    fallbackReason,
+    verdict: {
+      assessment: assessmentFor(ctx.risk.action),
+      summary: `The investigation was cancelled before it finished. This verdict repeats the risk engine result (score ${ctx.risk.score}, ${ctx.risk.level}).`,
+      evidence: ["Investigation cancelled before any conclusion."],
+      recommendedAction: ctx.risk.action,
     },
   };
 }
