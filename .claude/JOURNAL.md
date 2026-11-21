@@ -137,3 +137,18 @@ Checked through the real tunnel: `/`, `/api/state`, `/api/reset`, `/api/payments
 So the tunnel passes the public `Host` to the origin and the guard works; the open risk from the engine merge entry is closed.
 `cloudflared tunnel route dns <tunnel> <bare-name>` appends the zone of the logged-in certificate, which is how the zone name was found without asking.
 Still open: Devin key and org id are not in `.env.local` yet, so no real Devin run has happened.
+
+## 2026-11-21 - First real Devin runs: 27 to 28 seconds, verdict correct
+
+Roman created a service user key; the org id was read from `GET https://api.devin.ai/v3/self`, which returns `principal_type`, `service_user_id` and `org_id`.
+Two runs of scenario B with real Devin through the tunnel: session created in about 4 s, five read tools called at about 14 to 16 s, `create_incident` at about 26 s, verdict submitted at about 27 to 28 s.
+Both verdicts: `LIKELY_ACCOUNT_TAKEOVER`, `HOLD_AND_RESTRICT`, evidence lines traceable to tool results; the gateway had already held and restricted before Devin started.
+The create body was accepted as sent, the response carried `url`, and the verdict arrived through `submit_verdict`, so the 10 s polling was never the limiting factor.
+The 240 s cap is generous; it stays as the safety net. No `devin_mode` is set, and at 28 s there is no need to try `fast` before the pitch.
+Not exercised live: timeout and terminate, suspended or waiting sessions, rate limits, ACU cost.
+
+## 2026-11-21 - Dashboard polish merged
+
+Verdict card now shows the full summary and clamps only when it cannot fit (it still clamps at 1280x720 with the long fallback text).
+Engine badge is hidden until an investigation exists; customer actions in scenarios A and C are tagged "Customer".
+The polish agent ran `agent-browser close --all` and closed a browser session that belonged to other work; briefs must say "close only your own named session".

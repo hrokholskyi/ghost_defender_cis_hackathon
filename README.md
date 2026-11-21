@@ -335,7 +335,7 @@ What the tests prove:
 The investigator tests also cover the Devin client, the Devin engine, the tool endpoint, the fallback and the public-host guard.
 All of them run against a fake Devin API (`devin-fakes.ts`).
 
-## What is a stub or simulated, and what is unverified
+## What is a stub or simulated, and what is verified
 
 Simulated or stubbed:
 
@@ -354,13 +354,21 @@ Simulated or stubbed:
 - **Session tokens.** They are exposed in `GET /api/state` on purpose, so the dashboard can act as both phones.
   This is acceptable only because it is a simulator.
 
-Unverified:
+Verified against the real Devin API (two runs of scenario B on 2026-11-21, through a named Cloudflare tunnel):
 
-- The Devin engine was built and tested against a fake Devin API.
-  As of this writing, it has not been run against the real Devin API.
-- Not yet confirmed with the real API: whether the create-session body is accepted exactly as sent, whether the response contains a session `url`, how long a session takes compared with the 240 second cap, which `devin_mode` values are accepted, and the ACU cost of one run.
-- Not yet confirmed through a real tunnel: that the tunnel passes the public host to the guard (the `curl <public>/api/state` check above covers it).
-- Devin's tool calls were tested only against a local fake that calls the endpoints with `curl`.
+- The create-session body is accepted as sent, and the response contains the session `url`.
+- Devin called the five read tools and `create_incident` on the public tool endpoints, then submitted its verdict.
+- Both runs finished in about 27 to 28 seconds from session start to verdict, well inside the 240 second cap.
+- Both verdicts were `LIKELY_ACCOUNT_TAKEOVER` with the recommendation `HOLD_AND_RESTRICT`, and every evidence line matched a tool result.
+- On the public host every route other than the tool endpoints answered 404, and the tool endpoints answered 401 without a valid token.
+
+Still unverified:
+
+- Which `devin_mode` values the API accepts, and whether a faster mode shortens the run.
+- The ACU cost of one run.
+- Behaviour under rate limits (HTTP 429) during many runs in a row.
+- The failure paths against the real API: a suspended session, a session that waits for user input, and session termination after a timeout.
+  These are covered only by tests with a fake Devin API.
 
 ## Limitations and honest wording
 
