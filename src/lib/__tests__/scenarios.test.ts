@@ -222,6 +222,22 @@ describe("scenario B - account takeover", () => {
   });
 });
 
+describe("scenario B - SIM swap re-assessment", () => {
+  it("audits the attacker session and not the unchanged trusted iPhone session", () => {
+    startScenario("B");
+    nextScenarioStep();
+    const s = nextScenarioStep().state;
+    const sim = s.audit.find((e) => e.action === "SIM_SWAP_REPORTED")!;
+    const assessed = s.audit.filter((e) => e.action === "RISK_ASSESSED" && e.seq > sim.seq);
+    const attacker = attackerSession(s);
+    const iphone = iphoneSession(s);
+    expect(assessed.filter((e) => e.sessionId === attacker.id).map((e) => e.data?.score)).toEqual([40]);
+    expect(assessed.filter((e) => e.sessionId === iphone.id)).toHaveLength(0);
+    expect(s.risk[iphone.id]?.assessedAt).toBe(sim.at);
+    expect(s.risk[iphone.id]?.score).toBe(0);
+  });
+});
+
 describe("scenario C - legitimate phone change", () => {
   it("settles at risk 15 and keeps the session active", async () => {
     const s = runScenario("C");

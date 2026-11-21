@@ -164,6 +164,16 @@ export function respondToVerification(
   const proof: TrustedSessionProof = { verificationId: verification.id, sessionId: session.id };
   const suspicious = findSession(verification.suspiciousSessionId);
 
+  if (input.response === "CONFIRM") assertFunds(payment.amount);
+  audit({
+    actor: "customer-verification",
+    action: input.response === "DENY" ? "VERIFICATION_DENIED" : "VERIFICATION_CONFIRMED",
+    sessionId: session.id,
+    paymentId: payment.id,
+    detail: `Customer answered ${verification.id} with ${input.response} on a trusted device`,
+    data: { verificationId: verification.id },
+  });
+
   if (input.response === "DENY") {
     cancelPayment("customer-verification", payment.id, proof);
     if (suspicious && suspicious.id !== session.id) {
@@ -192,7 +202,6 @@ export function respondToVerification(
     });
     verification.status = "DENIED";
   } else {
-    assertFunds(payment.amount);
     releasePayment("customer-verification", payment.id, proof);
     if (suspicious && suspicious.status === "RESTRICTED") {
       liftRestriction("customer-verification", suspicious.id, proof);
@@ -211,14 +220,6 @@ export function respondToVerification(
 
   verification.respondedAt = now();
   touch();
-  audit({
-    actor: "customer-verification",
-    action: verification.status === "DENIED" ? "VERIFICATION_DENIED" : "VERIFICATION_CONFIRMED",
-    sessionId: session.id,
-    paymentId: payment.id,
-    detail: `Customer answered ${verification.id} with ${input.response} on a trusted device`,
-    data: { verificationId: verification.id },
-  });
 
   return { verification, payment, balance: state.customer.balance };
 }

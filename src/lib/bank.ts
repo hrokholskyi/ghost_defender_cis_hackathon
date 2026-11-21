@@ -126,6 +126,11 @@ export function assessSession(
   const assessment = assessRisk(buildRiskFacts(session, payment), state.risk[session.id], now());
   state.risk[session.id] = assessment;
   touch();
+  auditAssessment(session, context, assessment, paymentId);
+  return assessment;
+}
+
+function auditAssessment(session: Session, context: string, assessment: RiskAssessment, paymentId?: string): void {
   audit({
     actor: "risk-engine",
     action: "RISK_ASSESSED",
@@ -136,7 +141,14 @@ export function assessSession(
     }`,
     data: { score: assessment.score, level: assessment.level, action: assessment.action },
   });
-  return assessment;
+}
+
+function sameAssessment(a: RiskAssessment | undefined, b: RiskAssessment): boolean {
+  return (
+    a !== undefined &&
+    a.score === b.score &&
+    a.signals.map((s) => s.id).join(",") === b.signals.map((s) => s.id).join(",")
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +204,10 @@ export function login(input: LoginRequest): LoginResponse {
   return { session, risk };
 }
 
-/** Records a synthetic telco SIM swap signal and re-assesses every live session. */
+/**
+ * Records a synthetic telco SIM swap signal and re-assesses every live session.
+ * Every assessment is stored, but only a changed one is audited.
+ */
 export function reportSimSwap(input: SimSwapRequest): { sim: SimStatus } {
   const state = getState();
   const at = advanceClock(input.at);
@@ -212,7 +227,12 @@ export function reportSimSwap(input: SimSwapRequest): { sim: SimStatus } {
   });
 
   for (const session of state.sessions) {
-    if (session.status !== "REVOKED") assessSession(session, "SIM swap signal");
+    if (session.status === "REVOKED") continue;
+    const previous = state.risk[session.id];
+    const assessment = assessRisk(buildRiskFacts(session), previous, now());
+    state.risk[session.id] = assessment;
+    touch();
+    if (!sameAssessment(previous, assessment)) auditAssessment(session, "SIM swap signal", assessment);
   }
   return { sim: state.sim };
 }
