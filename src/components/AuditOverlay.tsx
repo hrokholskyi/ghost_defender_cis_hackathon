@@ -54,7 +54,7 @@ export function AuditOverlay({ rows, onClose }: { rows: AuditFullRow[]; onClose(
             <CloseIcon />
           </button>
         </div>
-        <div className="overlay-body" ref={bodyRef}>
+        <div className="overlay-body" ref={bodyRef} tabIndex={0} role="region" aria-label="Audit entries">
           <table className="audit-table">
             <thead>
               <tr>
