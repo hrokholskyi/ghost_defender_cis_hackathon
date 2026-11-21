@@ -116,7 +116,7 @@ describe("engine selection", () => {
     expect(result.verdict.incidentId).toBe("INC-0001");
   });
 
-  it("getLlmStatus reports no LLM until the Devin engine is connected", () => {
+  it("getLlmStatus reports no LLM when the fallback is forced", () => {
     expect(getLlmStatus()).toEqual({ configured: false, model: null });
   });
 });
