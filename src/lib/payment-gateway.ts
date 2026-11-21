@@ -58,7 +58,7 @@ function validField<K extends keyof typeof transferSchema.shape>(raw: unknown, k
   return parsed.success ? (parsed.data as z.output<(typeof transferSchema.shape)[K]>) : undefined;
 }
 
-function recordRejected(session: Session, raw: unknown, reason: string): Payment {
+function recordRejected(session: Session, raw: unknown, reason: string, data: Record<string, unknown>): Payment {
   const risk = getState().risk[session.id];
   const at = now();
   const beneficiaryId = validField(raw, "beneficiaryId");
@@ -86,6 +86,7 @@ function recordRejected(session: Session, raw: unknown, reason: string): Payment
     sessionId: session.id,
     paymentId: payment.id,
     detail: payment.amount > 0 ? `Transfer of ${formatAed(payment.amount)} refused: ${reason}` : `Transfer refused: ${reason}`,
+    data,
   });
   return payment;
 }
@@ -100,8 +101,8 @@ export function requestTransfer(token: string | null, raw: unknown): PaymentResp
     const at = validField(raw, "at");
     if (at !== undefined) advanceClock(at);
     const code = session.status === "RESTRICTED" ? "SESSION_RESTRICTED" : "SESSION_REVOKED";
-    const reason = `session ${session.id} is ${session.status}`;
-    recordRejected(session, raw, reason);
+    const reason = `this session is ${session.status === "RESTRICTED" ? "restricted" : "revoked"}.`;
+    recordRejected(session, raw, reason, { code, sessionId: session.id, sessionStatus: session.status });
     throw new DomainError(code, `Transfer refused: ${reason}`);
   }
 
@@ -221,33 +222,33 @@ export function executePayment(token: string | null, paymentId: string): Payment
     throw new DomainError("NOT_FOUND", `Payment ${paymentId} not found for this session`);
   }
 
-  const refuse = (code: "SESSION_RESTRICTED" | "SESSION_REVOKED" | "PAYMENT_HELD" | "CONFLICT", message: string) => {
+  /** `reason` is plain text without ids; ids and statuses go into the audit data. */
+  const refuse = (code: "SESSION_RESTRICTED" | "SESSION_REVOKED" | "PAYMENT_HELD" | "CONFLICT", reason: string) => {
     audit({
       actor: "payment-gateway",
       action: "HOLD_BYPASS_ATTEMPT",
       sessionId: session.id,
       paymentId,
-      detail: `Retry of ${formatAed(payment.amount)} refused (${code}): ${message}`,
-      data: { code, paymentStatus: payment.status, sessionStatus: session.status },
+      detail: `Retry of ${formatAed(payment.amount)} refused: ${reason}`,
+      data: { code, sessionId: session.id, paymentStatus: payment.status, sessionStatus: session.status },
     });
-    return new DomainError(code, message);
+    return new DomainError(code, `Retry refused: ${reason}`);
   };
 
-  if (session.status === "RESTRICTED") throw refuse("SESSION_RESTRICTED", `Session ${session.id} is restricted`);
-  if (session.status === "REVOKED") throw refuse("SESSION_REVOKED", `Session ${session.id} was revoked`);
+  if (session.status === "RESTRICTED") throw refuse("SESSION_RESTRICTED", "this session is restricted.");
+  if (session.status === "REVOKED") throw refuse("SESSION_REVOKED", "this session is revoked.");
 
   const risk = state.risk[session.id];
   switch (payment.status) {
     case "SETTLED":
       return { payment, risk, balance: state.customer.balance };
     case "HELD":
+      throw refuse("PAYMENT_HELD", "this payment is held. Only the customer's trusted device can release it.");
     case "PENDING_VERIFICATION":
-      throw refuse(
-        "PAYMENT_HELD",
-        `Payment ${payment.id} is ${payment.status}. Only the customer's trusted device can release it`,
-      );
+      throw refuse("PAYMENT_HELD", "this payment waits for confirmation. Only the customer's trusted device can release it.");
     case "CANCELLED":
+      throw refuse("CONFLICT", "this payment was cancelled and cannot be executed.");
     case "REJECTED":
-      throw refuse("CONFLICT", `Payment ${payment.id} is ${payment.status} and cannot be executed`);
+      throw refuse("CONFLICT", "this payment was refused and cannot be executed.");
   }
 }

@@ -58,7 +58,7 @@ describe("risk engine weights", () => {
       RAPID_SEQUENCE: 15,
     });
     expect(RISK_CONFIG.thresholds).toEqual({ elevated: 30, high: 60, critical: 80 });
-    expect(RISK_CONFIG.disclaimer).toBe("Demo weights and thresholds. Not a calibrated model.");
+    expect(RISK_CONFIG.disclaimer).toBe("Demo weights and thresholds. Synthetic scores and amounts. Not a calibrated model.");
   });
 
   const cases: Array<[RiskSignalId, Partial<RiskFacts>]> = [

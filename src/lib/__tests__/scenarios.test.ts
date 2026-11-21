@@ -291,6 +291,39 @@ describe("SIM swap re-assessment", () => {
   });
 });
 
+describe("backend wording", () => {
+  it("scenario B audit and messages use plain, honest text", async () => {
+    const s = runScenario("B");
+    const attacker = attackerSession(s);
+    const payment = s.payments.find((p) => p.sessionId === attacker.id)!;
+    await whenIdle();
+    const after = getSnapshot();
+    const detail = (action: string) => after.audit.find((e) => e.action === action && (e.sessionId === attacker.id || !e.sessionId))?.detail;
+
+    expect(detail("LOGIN_SUCCEEDED")).toMatch(/^Login accepted \(simulated: password and SMS code assumed correct\)\. Device .+ \(Android, not in device history\), network /);
+    expect(detail("SIM_SWAP_REPORTED")).toBe("Synthetic telco signal: SIM swapped at 01:15, phone number +971 •• ••• 4821");
+
+    const incident = after.incidents.find((i) => i.paymentId === payment.id)!;
+    expect(incident.title).toBe("Suspected account takeover");
+    const verdict = after.investigations.find((i) => i.paymentId === payment.id)!.verdict!;
+    expect(verdict.summary).toContain("This session matches the demo account takeover pattern (risk score 90, Critical).");
+    expect(after.riskConfig.disclaimer).toBe("Demo weights and thresholds. Synthetic scores and amounts. Not a calibrated model.");
+
+    const transfer = expectDomainError(
+      () => requestTransfer(attacker.token, { beneficiaryId: payment.beneficiaryId, amount: 500 }),
+      "SESSION_RESTRICTED",
+    );
+    expect(transfer.message).toBe("Transfer refused: this session is restricted.");
+    const rejected = getSnapshot().audit.filter((e) => e.action === "PAYMENT_REJECTED").at(-1)!;
+    expect(rejected.detail).toBe("Transfer of AED 500 refused: this session is restricted.");
+    expect(rejected.data).toMatchObject({ code: "SESSION_RESTRICTED", sessionId: attacker.id, sessionStatus: "RESTRICTED" });
+
+    const retry = expectDomainError(() => executePayment(attacker.token, payment.id), "SESSION_RESTRICTED");
+    expect(retry.message).toBe("Retry refused: this session is restricted.");
+    for (const text of getSnapshot().audit.map((e) => e.detail)) expect(text).not.toMatch(/[–—]/);
+  });
+});
+
 describe("staged hold in the gateway's own record", () => {
   it("scenario B: the hold names 75 (High, Unusual amount), the restriction 90 (Critical, Rapid sequence)", async () => {
     const s = runScenario("B");

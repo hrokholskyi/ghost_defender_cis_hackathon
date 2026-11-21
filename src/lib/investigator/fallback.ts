@@ -11,6 +11,7 @@ import type {
   InvestigationVerdict,
   RiskAction,
 } from "@/lib/types";
+import { RISK_LEVEL_LABELS } from "@/lib/config";
 import { READ_TOOLS, type ReadResults, type StepRecorder } from "./steps";
 
 export async function runFallback(
@@ -132,12 +133,13 @@ export function buildSummary(
   incidentId: string | undefined,
 ): string {
   const sentences: string[] = [];
+  const score = `risk score ${ctx.risk.score}, ${RISK_LEVEL_LABELS[ctx.risk.level] ?? ctx.risk.level}`;
   sentences.push(
     assessment === "LIKELY_ACCOUNT_TAKEOVER"
-      ? `This session matches an account takeover pattern (risk score ${ctx.risk.score}, ${ctx.risk.level}).`
+      ? `This session matches the demo account takeover pattern (${score}).`
       : assessment === "SUSPICIOUS"
-        ? `This session shows warning signs that need extra verification (risk score ${ctx.risk.score}, ${ctx.risk.level}).`
-        : `This session looks consistent with the customer's normal behaviour (risk score ${ctx.risk.score}, ${ctx.risk.level}).`,
+        ? `This session shows warning signs that need extra verification (${score}).`
+        : `This session looks consistent with the customer's normal behaviour (${score}).`,
   );
 
   const facts: string[] = [];

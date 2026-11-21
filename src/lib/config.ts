@@ -1,6 +1,6 @@
 /**
  * Demo configuration of the transparent point model and the simulator.
- * Demo weights and thresholds. Not a calibrated model.
+ * Demo weights and thresholds. Synthetic scores and amounts. Not a calibrated model.
  */
 import type { RiskConfig, RiskLevel, RiskSignalId } from "@/lib/types";
 
@@ -24,7 +24,7 @@ export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
   CRITICAL: "Critical",
 };
 
-export const RISK_DISCLAIMER = "Demo weights and thresholds. Not a calibrated model.";
+export const RISK_DISCLAIMER = "Demo weights and thresholds. Synthetic scores and amounts. Not a calibrated model.";
 
 export const RISK_SIGNAL_LABELS: Record<RiskSignalId, string> = {
   UNKNOWN_DEVICE: "Unknown device",

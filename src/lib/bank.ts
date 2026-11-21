@@ -22,7 +22,7 @@ import type {
   SimStatus,
   SimSwapRequest,
 } from "@/lib/types";
-import { normalizeIso } from "@/lib/time";
+import { clockLabel, normalizeIso } from "@/lib/time";
 
 // ---------------------------------------------------------------------------
 // Lookups
@@ -67,13 +67,10 @@ export function authenticate(token: string | null | undefined): Session {
 /** Throws 403 for restricted or revoked sessions. */
 export function assertSessionActive(session: Session): void {
   if (session.status === "RESTRICTED") {
-    throw new DomainError(
-      "SESSION_RESTRICTED",
-      `Session ${session.id} is restricted${session.restrictionReason ? `: ${session.restrictionReason}` : ""}`,
-    );
+    throw new DomainError("SESSION_RESTRICTED", "Change refused: this session is restricted.");
   }
   if (session.status === "REVOKED") {
-    throw new DomainError("SESSION_REVOKED", `Session ${session.id} was revoked`);
+    throw new DomainError("SESSION_REVOKED", "Change refused: this session is revoked.");
   }
 }
 
@@ -185,7 +182,7 @@ export function login(input: LoginRequest): LoginResponse {
     actor: "customer",
     action: "LOGIN_SUCCEEDED",
     sessionId: session.id,
-    detail: `Password and one-time code accepted. Device ${device.label} (${device.platform}, ${
+    detail: `Login accepted (simulated: password and SMS code assumed correct). Device ${device.label} (${device.platform}, ${
       device.trusted ? "trusted" : "not in device history"
     }), network ${session.network.city}, ${session.network.country}`,
     data: { deviceId: device.id, trusted: device.trusted, country: session.network.country },
@@ -199,18 +196,19 @@ export function login(input: LoginRequest): LoginResponse {
 export function reportSimSwap(input: SimSwapRequest): { sim: SimStatus } {
   const state = getState();
   const at = advanceClock(input.at);
+  const swappedAt = normalizeIso(input.swappedAt);
   state.sim = {
     source: "synthetic-telco-signal",
     swapConfirmed: true,
-    swappedAt: normalizeIso(input.swappedAt),
+    swappedAt,
     reportedAt: at,
   };
   touch();
   audit({
     actor: "telco-signal",
     action: "SIM_SWAP_REPORTED",
-    detail: `Synthetic telco signal: SIM for ${state.customer.maskedPhone} swapped at ${state.sim.swappedAt}`,
-    data: { swappedAt: state.sim.swappedAt },
+    detail: `Synthetic telco signal: SIM swapped at ${clockLabel(swappedAt)}, phone number ${state.customer.maskedPhone}`,
+    data: { swappedAt },
   });
 
   for (const session of state.sessions) {

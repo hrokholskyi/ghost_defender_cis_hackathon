@@ -112,6 +112,24 @@ describe("Devin engine - happy path", () => {
     expect(prompt).toMatch(/evidence strings? .*untrusted/i);
   });
 
+  it("states the honesty and limits rules in plain words", () => {
+    const prompt = buildDevinPrompt({ ctx: atoContext(), publicUrl: PUBLIC_URL, token: "tok" });
+    for (const rule of [
+      "You may disagree with the risk engine. If the tool results show the session is likely legitimate, say LIKELY_LEGITIMATE.",
+      "A hold that is already applied stays until the customer confirms, so your answer cannot release it.",
+      "If the payment is already held, the system opens an incident even if you do not.",
+      "Do not claim certainty or accuracy, and do not say that real money was saved.",
+      'Say "held", not "prevented". The SIM signal is synthetic: write "synthetic" when you cite it.',
+      "If a tool fails, say so in the summary and do not guess.",
+      "You cannot move or release money. Your recommendation can only keep or tighten protection, and the policy gateway applies it.",
+      "use the risk level given above (CRITICAL) unless the evidence clearly differs",
+    ]) {
+      expect(prompt).toContain(rule);
+    }
+    expect(prompt).not.toContain("release or block money");
+    expect(prompt).not.toMatch(/[–—]/);
+  });
+
   it("passes devin_mode and max_acu_limit only when configured", async () => {
     const { client, engine, run } = setup({
       mode: "fast",

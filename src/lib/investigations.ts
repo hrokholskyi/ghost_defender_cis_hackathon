@@ -251,7 +251,7 @@ function ensureIncidentForHeldPayment(paymentId: string): void {
   const payment = findPayment(paymentId);
   if (!payment || payment.status !== "HELD" || findIncidentForPayment(paymentId)) return;
   openIncident("policy-gateway", payment.sessionId, payment.id, {
-    title: "Payment held before debit: suspected account takeover",
+    title: "Suspected account takeover",
     severity: payment.riskLevel,
     reasons: [...payment.reasons],
   });

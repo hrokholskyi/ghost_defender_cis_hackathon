@@ -3,6 +3,7 @@
  * validates its verdict, and falls back to the deterministic investigator on
  * any problem. Never throws, never hangs.
  */
+import { RISK_LEVEL_LABELS } from "@/lib/config";
 import type {
   InvestigationContext,
   InvestigationResult,
@@ -183,7 +184,7 @@ function cancelled(ctx: InvestigationContext, signal: AbortSignal): Investigatio
     fallbackReason,
     verdict: {
       assessment: assessmentFor(ctx.risk.action),
-      summary: `The investigation was cancelled before it finished. This verdict repeats the risk engine result (score ${ctx.risk.score}, ${ctx.risk.level}).`,
+      summary: `The investigation was cancelled before it finished. This verdict repeats the risk engine result (score ${ctx.risk.score}, ${RISK_LEVEL_LABELS[ctx.risk.level] ?? ctx.risk.level}).`,
       evidence: ["Investigation cancelled before any conclusion."],
       recommendedAction: ctx.risk.action,
     },
@@ -204,7 +205,7 @@ function lastResort(ctx: InvestigationContext, sink: InvestigationSink, err: unk
     fallbackReason,
     verdict: {
       assessment: assessmentFor(ctx.risk.action),
-      summary: `The investigation could not complete, so this verdict repeats the risk engine result (score ${ctx.risk.score}, ${ctx.risk.level}). Recommended action: ${ctx.risk.action}.`,
+      summary: `The investigation could not complete, so this verdict repeats the risk engine result (score ${ctx.risk.score}, ${RISK_LEVEL_LABELS[ctx.risk.level] ?? ctx.risk.level}). Recommended action: ${ctx.risk.action}.`,
       evidence: signals.length > 0 ? signals.map((s) => `${s.label}: ${s.evidence}`) : ["No risk signals recorded."],
       recommendedAction: ctx.risk.action,
     },

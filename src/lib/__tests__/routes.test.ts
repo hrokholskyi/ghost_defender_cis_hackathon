@@ -56,7 +56,7 @@ describe("API routes - scenario B through the HTTP layer", () => {
     const started = await read<StateSnapshot>(await postScenarioStart(req("/api/scenarios/b/start"), params("b")), 200);
     expect(started.scenario).toEqual({ id: "B", nextStep: 0, totalSteps: 4, actorSessionId: null });
     expect(started.scenarios.map((x) => x.id)).toEqual(["A", "B", "C"]);
-    expect(started.riskConfig.disclaimer).toBe("Demo weights and thresholds. Not a calibrated model.");
+    expect(started.riskConfig.disclaimer).toBe("Demo weights and thresholds. Synthetic scores and amounts. Not a calibrated model.");
     expect(started.llm).toEqual({ configured: false, model: null });
 
     const scores: number[] = [];
