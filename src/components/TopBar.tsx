@@ -1,10 +1,10 @@
 import { Fragment } from "react";
 import type { ScenarioId } from "@/lib/types";
-import type { TopBarView } from "@/lib/ui/view-model";
+import { autoplayTitle, type PresenterTopBarView } from "@/lib/ui/presenter";
 import { BrandMark, Chevron, NextIcon, PauseBars, PlayIcon, RestartIcon } from "./icons";
 
 interface Props {
-  view: TopBarView;
+  view: PresenterTopBarView;
   onStart(id: ScenarioId): void;
   onNext(): void;
   onRestart(): void;
@@ -20,7 +20,7 @@ export function TopBar({ view, onStart, onNext, onRestart, onToggleAutoplay }: P
         <span className="brand-tags">
           <span className="sim-tag">SIMULATION - synthetic data</span>
           {!view.reachable ? (
-            <span className="link-status is-down" role="status">
+            <span className="link-status is-down" role="status" title="Backend unreachable - showing last state">
               Backend unreachable - showing last state
             </span>
           ) : view.error ? (
@@ -29,7 +29,7 @@ export function TopBar({ view, onStart, onNext, onRestart, onToggleAutoplay }: P
             </span>
           ) : (
             <span className="engine-status" data-engine={view.investigatorEngine} title={view.investigator}>
-              {view.investigator}
+              <span className="engine-status-text">{view.investigator}</span>
             </span>
           )}
         </span>
@@ -71,6 +71,7 @@ export function TopBar({ view, onStart, onNext, onRestart, onToggleAutoplay }: P
               className={`scenario-btn${s.active ? " is-active" : ""}`}
               aria-pressed={s.active}
               title={`Scenario ${s.id}: ${s.title}`}
+              aria-label={`Scenario ${s.id}: ${s.title}`}
               disabled={view.busy}
               onClick={() => onStart(s.id)}
             >
@@ -82,8 +83,9 @@ export function TopBar({ view, onStart, onNext, onRestart, onToggleAutoplay }: P
         <button
           className="ctrl ctrl--primary"
           type="button"
-          title="Run the next event (Right arrow or Space)"
+          title={view.revealing ? "Wait - the current event is still playing" : "Run the next event (Right arrow or Space)"}
           aria-keyshortcuts="ArrowRight Space"
+          aria-busy={view.revealing}
           disabled={view.nextDisabled}
           onClick={onNext}
         >
@@ -93,10 +95,11 @@ export function TopBar({ view, onStart, onNext, onRestart, onToggleAutoplay }: P
         <button
           className={`ctrl${view.autoplay ? " is-on" : ""}`}
           type="button"
-          title={view.autoplay ? "Stop autoplay (P)" : "Autoplay the remaining events (P)"}
+          title={autoplayTitle(view)}
           aria-label="Autoplay"
           aria-keyshortcuts="P"
           aria-pressed={view.autoplay}
+          disabled={view.finished && !view.autoplay}
           onClick={onToggleAutoplay}
         >
           {view.autoplay ? <PauseBars /> : <PlayIcon />}
