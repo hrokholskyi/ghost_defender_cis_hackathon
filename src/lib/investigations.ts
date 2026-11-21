@@ -63,7 +63,7 @@ export function startInvestigation(
     sessionId: payment.sessionId,
     paymentId: payment.id,
     status: "RUNNING",
-    engine: getLlmStatus().configured ? "claude" : "deterministic-fallback",
+    engine: getLlmStatus().configured ? "devin" : "deterministic-fallback",
     steps: [],
     startedAt: now(),
   };
