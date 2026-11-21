@@ -1,0 +1,1529 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ghost Login Defender</title>
+<style>
+/* ==========================================================================
+   Tokens. Every colour, spacing step and type size lives here.
+   --u is the layout unit: 1% of a 16:9 frame that fits the viewport.
+   ========================================================================== */
+:root {
+  --u: min(1vh, 0.5625vw);
+
+  /* Night-shift surfaces (deep navy, not black) */
+  --ink-950: #07101f;
+  --ink-900: #0b1628;
+  --ink-850: #0f1c33;
+  --ink-800: #13233e;
+  --ink-700: #1b2f50;
+  --ink-600: #26406a;
+  --line: #233a5e;
+  --line-strong: #34507d;
+
+  --text: #eef3fb;
+  --text-2: #b4c3da;
+  --text-3: #7d90ad;
+
+  /* Meaning colours */
+  --band-low: #6ea8ff;        /* monitor */
+  --band-elevated: #ffc53d;   /* extra verification */
+  --band-high: #ff8a3c;       /* hold payment */
+  --band-critical: #ff4d6d;   /* hold + restrict + incident */
+  --protected: #34d896;       /* money safe, contained */
+  --ai: #b79cff;              /* AI investigation agent */
+  --customer: #a9c1ff;        /* real customer, moonlight */
+  --attacker: #ff6f91;        /* attacker side */
+
+  --band-color: var(--band-low);
+
+  /* Phone surfaces */
+  --iphone-frame: #2a2f3a;
+  --iphone-wall-1: #0b1430;
+  --iphone-wall-2: #1c2758;
+  --android-frame: #15171c;
+  --app-bg: #f3f5f8;
+  --app-surface: #ffffff;
+  --app-text: #142033;
+  --app-text-2: #5b6b82;
+  --app-line: #dfe4ec;
+  --app-brand: #0d6b6e;
+
+  /* Type */
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --fs-2xs: calc(var(--u) * 1.15);
+  --fs-xs: calc(var(--u) * 1.3);
+  --fs-sm: calc(var(--u) * 1.5);
+  --fs-md: calc(var(--u) * 1.75);
+  --fs-lg: calc(var(--u) * 2.2);
+  --fs-xl: calc(var(--u) * 2.9);
+  --fs-2xl: calc(var(--u) * 4.2);
+  --fs-stamp: calc(var(--u) * 6.2);
+  --fs-score: calc(var(--u) * 7.4);
+
+  /* Spacing */
+  --sp-1: calc(var(--u) * 0.4);
+  --sp-2: calc(var(--u) * 0.8);
+  --sp-3: calc(var(--u) * 1.2);
+  --sp-4: calc(var(--u) * 1.6);
+  --sp-5: calc(var(--u) * 2.4);
+  --sp-6: calc(var(--u) * 3.2);
+
+  /* Shape */
+  --r-sm: calc(var(--u) * 0.5);
+  --r-md: calc(var(--u) * 0.9);
+  --r-lg: calc(var(--u) * 1.4);
+
+  /* Layout */
+  --topbar-h: calc(var(--u) * 6.6);
+  --side-w: calc(var(--u) * 37);
+  --phone-h: calc(var(--u) * 70);
+
+  /* Motion */
+  --t-fast: 180ms;
+  --t-med: 420ms;
+  --t-slow: 700ms;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--ink-950);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+svg { display: block; }
+button { font: inherit; color: inherit; }
+
+/* ==========================================================================
+   App shell
+   ========================================================================== */
+.app {
+  position: relative;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: var(--topbar-h) 1fr;
+  background:
+    radial-gradient(120% 80% at 50% 0%, var(--ink-850) 0%, var(--ink-950) 70%);
+}
+.app[data-band="low"] { --band-color: var(--band-low); }
+.app[data-band="elevated"] { --band-color: var(--band-elevated); }
+.app[data-band="high"] { --band-color: var(--band-high); }
+.app[data-band="critical"] { --band-color: var(--band-critical); }
+
+/* Screen-edge flash for the HOLD / RESTRICTED moments */
+.app::after {
+  content: "";
+  position: absolute; inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 0 transparent;
+  transition: box-shadow var(--t-med) var(--ease);
+  z-index: 50;
+}
+.app[data-moment="hold"]::after { box-shadow: inset 0 0 0 calc(var(--u) * 0.7) var(--band-high), inset 0 0 calc(var(--u) * 12) rgba(255, 138, 60, .35); }
+.app[data-moment="restrict"]::after { box-shadow: inset 0 0 0 calc(var(--u) * 0.7) var(--band-critical), inset 0 0 calc(var(--u) * 12) rgba(255, 77, 109, .38); }
+
+/* ==========================================================================
+   Top bar
+   ========================================================================== */
+.topbar {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: var(--sp-5);
+  padding: 0 var(--sp-5);
+  border-bottom: 1px solid var(--line);
+  background: var(--ink-900);
+}
+.brand { display: flex; align-items: center; gap: var(--sp-3); }
+.brand-mark { width: calc(var(--u) * 3.6); height: calc(var(--u) * 3.6); }
+.brand-name { font-size: var(--fs-lg); font-weight: 750; letter-spacing: -0.01em; white-space: nowrap; }
+.sim-tag {
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  color: var(--band-elevated);
+  border: 1px solid currentColor;
+  border-radius: var(--r-sm);
+  padding: var(--sp-1) var(--sp-2);
+  white-space: nowrap;
+}
+
+.event-chips {
+  list-style: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.event-chip {
+  display: flex; align-items: center; gap: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  color: var(--text-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  transition: color var(--t-med), border-color var(--t-med), background var(--t-med);
+  white-space: nowrap;
+}
+.event-chip-dot {
+  width: calc(var(--u) * 0.9); height: calc(var(--u) * 0.9);
+  border-radius: 50%;
+  background: var(--line-strong);
+  transition: background var(--t-med), box-shadow var(--t-med);
+}
+.event-chip.is-active { color: var(--text); border-color: var(--attacker); background: rgba(255, 111, 145, .12); }
+.event-chip.is-active .event-chip-dot { background: var(--attacker); box-shadow: 0 0 0 calc(var(--u) * 0.45) rgba(255, 111, 145, .25); animation: pulse 1.2s ease-in-out infinite; }
+.event-chip.is-done { color: var(--text-2); border-color: var(--line-strong); }
+.event-chip.is-done .event-chip-dot { background: var(--text-2); }
+.event-sep { width: calc(var(--u) * 1.3); height: calc(var(--u) * 1.3); color: var(--line-strong); flex: none; }
+
+.sim-clock { display: flex; align-items: baseline; gap: var(--sp-2); white-space: nowrap; }
+.sim-clock-label { font-size: var(--fs-xs); color: var(--text-3); }
+.sim-clock-time { font-family: var(--font-mono); font-size: var(--fs-xl); font-weight: 700; letter-spacing: -0.02em; }
+.sim-clock-time small { font-size: var(--fs-md); color: var(--text-3); font-weight: 600; }
+
+.controls { display: flex; align-items: center; gap: var(--sp-1); }
+.ctrl {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  height: calc(var(--u) * 3.6);
+  min-width: calc(var(--u) * 3.6);
+  justify-content: center;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+.ctrl:hover { background: var(--ink-700); color: var(--text); }
+.ctrl:focus-visible { outline: 2px solid var(--band-low); outline-offset: 2px; }
+.ctrl svg { width: calc(var(--u) * 1.6); height: calc(var(--u) * 1.6); }
+.ctrl--primary { color: var(--ink-950); background: var(--text); border-color: var(--text); font-weight: 700; padding: 0 var(--sp-3); }
+.ctrl--primary:hover { background: #ffffff; color: var(--ink-950); }
+.ctrl--primary.is-playing { background: transparent; color: var(--text-2); border-color: var(--line); font-weight: 500; }
+.ctrl--primary.is-playing:hover { background: var(--ink-700); color: var(--text); }
+
+.progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; }
+.progress-bar { display: block; height: 100%; width: 0; background: var(--band-color); transition: background var(--t-med); }
+
+/* ==========================================================================
+   Three-column stage
+   ========================================================================== */
+.stage-grid {
+  display: grid;
+  grid-template-columns: var(--side-w) minmax(0, 1fr) var(--side-w);
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-5);
+  min-height: 0;
+}
+.column { position: relative; min-height: 0; display: flex; flex-direction: column; }
+.column--customer, .column--attacker { align-items: center; justify-content: center; gap: var(--sp-3); }
+
+.column-head { width: 100%; display: grid; grid-template-columns: 1fr auto; align-items: end; gap: var(--sp-1) var(--sp-3); }
+.column-role { grid-column: 1 / -1; font-size: var(--fs-sm); font-weight: 700; display: flex; align-items: center; gap: var(--sp-2); }
+.column-role::before { content: ""; width: calc(var(--u) * 1); height: calc(var(--u) * 1); border-radius: 50%; background: currentColor; }
+.column--customer .column-role { color: var(--customer); }
+.column--attacker .column-role { color: var(--attacker); }
+.column-title { font-size: var(--fs-xl); font-weight: 750; letter-spacing: -0.015em; line-height: 1.1; }
+.column-sub { grid-column: 1; font-size: var(--fs-xs); color: var(--text-2); }
+.presence {
+  grid-column: 2; grid-row: 2 / span 2; align-self: center;
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  font-size: var(--fs-xs); font-weight: 650;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--text-2);
+  white-space: nowrap;
+  transition: color var(--t-med), border-color var(--t-med), background var(--t-med);
+}
+.presence svg { width: calc(var(--u) * 1.4); height: calc(var(--u) * 1.4); }
+.presence.is-alert { color: var(--protected); border-color: var(--protected); background: rgba(52, 216, 150, .12); }
+.presence.is-hostile { color: var(--attacker); border-color: var(--attacker); background: rgba(255, 111, 145, .1); }
+.presence.is-blocked { color: var(--band-critical); border-color: var(--band-critical); background: rgba(255, 77, 109, .14); }
+
+.column-note {
+  width: 100%;
+  min-height: calc(var(--fs-xs) * 1.35 * 2 + var(--sp-2) * 2);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 2px solid var(--line-strong);
+  transition: color var(--t-med), border-color var(--t-med);
+}
+.column-note.is-key { color: var(--text); border-color: var(--protected); }
+.column-note.is-hostile { color: var(--text); border-color: var(--attacker); }
+
+/* ==========================================================================
+   Phones (shared)
+   ========================================================================== */
+.phone {
+  position: relative;
+  height: var(--phone-h);
+  aspect-ratio: 0.49;
+  max-width: 100%;
+  flex: none;
+}
+.phone-screen {
+  position: absolute;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.phone-status {
+  position: relative; z-index: 3;
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: var(--fs-2xs); font-weight: 650;
+  padding: 0 var(--sp-4);
+  flex: none;
+}
+.phone-status-left, .phone-status-right { display: flex; align-items: center; gap: var(--sp-2); }
+.phone-status svg { height: calc(var(--u) * 1.2); width: auto; }
+
+/* iPhone 15 Pro */
+.phone--iphone {
+  border-radius: calc(var(--u) * 5.6);
+  background: linear-gradient(145deg, #4a505c, var(--iphone-frame) 40%, #1a1e26);
+  padding: calc(var(--u) * 0.7);
+  box-shadow: 0 0 0 1px #5b6270 inset;
+}
+.phone--iphone .phone-screen {
+  inset: calc(var(--u) * 0.7);
+  border-radius: calc(var(--u) * 4.9);
+  background: radial-gradient(120% 70% at 30% 10%, var(--iphone-wall-2), var(--iphone-wall-1) 65%);
+  color: #fff;
+}
+.phone-island {
+  position: absolute; z-index: 4;
+  top: calc(var(--u) * 1.2); left: 50%; transform: translateX(-50%);
+  width: 32%; height: calc(var(--u) * 3);
+  background: #000; border-radius: 999px;
+}
+.phone--iphone .phone-status { height: calc(var(--u) * 5.4); padding-top: calc(var(--u) * 0.4); padding-inline: calc(var(--u) * 2.6); }
+
+.phone-dim {
+  position: absolute; inset: 0; z-index: 2;
+  background: rgba(0, 0, 8, .5);
+  pointer-events: none;
+  transition: opacity var(--t-slow) var(--ease);
+}
+.phone--iphone.is-awake .phone-dim { opacity: 0; }
+
+.no-service { transition: color var(--t-med); }
+.no-service.is-alert { color: var(--band-elevated); }
+
+.lock { position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; align-items: center; padding: 0 var(--sp-4) var(--sp-4); }
+.lock-focus {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  font-size: var(--fs-2xs); font-weight: 600; color: #cfd8ff;
+  background: rgba(255, 255, 255, .1);
+  padding: var(--sp-1) var(--sp-2); border-radius: 999px;
+  margin-top: var(--sp-2);
+}
+.lock-focus svg { width: calc(var(--u) * 1.2); height: calc(var(--u) * 1.2); }
+.lock-date { margin-top: var(--sp-3); font-size: var(--fs-sm); font-weight: 600; color: #dde4ff; }
+.lock-time { font-size: calc(var(--u) * 9.4); font-weight: 650; letter-spacing: -0.03em; line-height: 1; color: #eef1ff; }
+
+.bank-widget {
+  width: 100%;
+  margin-top: var(--sp-4);
+  background: rgba(255, 255, 255, .1);
+  border-radius: var(--r-lg);
+  padding: var(--sp-3) var(--sp-4);
+  transition: background var(--t-slow), box-shadow var(--t-slow);
+}
+.bank-widget-label { font-size: var(--fs-2xs); color: #c9d3f5; display: flex; justify-content: space-between; }
+.bank-widget-amount { font-size: var(--fs-xl); font-weight: 750; letter-spacing: -0.01em; margin-top: var(--sp-1); line-height: 1.1; }
+.bank-widget-status { display: flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-2xs); color: #c9d3f5; margin-top: var(--sp-1); min-height: calc(var(--u) * 1.8); }
+.bank-widget-status svg { width: calc(var(--u) * 1.4); height: calc(var(--u) * 1.4); flex: none; }
+.bank-widget.is-protected { background: rgba(52, 216, 150, .16); box-shadow: 0 0 0 1px rgba(52, 216, 150, .7) inset; }
+.bank-widget.is-protected .bank-widget-status { color: var(--protected); font-weight: 700; }
+
+.push {
+  width: 100%;
+  margin-top: var(--sp-3);
+  background: rgba(240, 244, 255, .94);
+  color: #0d1730;
+  border-radius: var(--r-lg);
+  padding: var(--sp-3);
+  opacity: 0;
+  transform: translateY(calc(var(--u) * -3)) scale(.96);
+  transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease);
+}
+.push.is-shown { opacity: 1; transform: none; }
+.push-head { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-2xs); color: #4b5675; }
+.push-icon { width: calc(var(--u) * 2.2); height: calc(var(--u) * 2.2); border-radius: calc(var(--u) * 0.6); background: var(--app-brand); display: grid; place-items: center; flex: none; }
+.push-icon svg { width: 62%; height: 62%; }
+.push-app { font-weight: 700; color: #0d1730; flex: 1; }
+.push-title { font-size: var(--fs-xs); font-weight: 750; margin-top: var(--sp-2); line-height: 1.25; }
+.push-body { font-size: var(--fs-2xs); color: #3b4664; margin-top: var(--sp-1); }
+.push-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); margin-top: var(--sp-3); }
+.push-btn { font-size: var(--fs-2xs); font-weight: 700; text-align: center; padding: var(--sp-2) var(--sp-1); border-radius: var(--r-md); background: rgba(13, 23, 48, .08); }
+.push-btn--deny { background: #d92d4f; color: #fff; }
+
+.lock-bottom { margin-top: auto; width: 100%; display: flex; justify-content: space-between; padding: 0 var(--sp-3); }
+.lock-round { width: calc(var(--u) * 4.2); height: calc(var(--u) * 4.2); border-radius: 50%; background: rgba(255, 255, 255, .12); display: grid; place-items: center; }
+.lock-round svg { width: 42%; height: 42%; }
+.home-indicator { position: absolute; z-index: 3; bottom: calc(var(--u) * 0.9); left: 50%; transform: translateX(-50%); width: 36%; height: calc(var(--u) * 0.5); border-radius: 999px; background: rgba(255, 255, 255, .8); }
+
+/* Samsung Galaxy A54 */
+.phone--android {
+  border-radius: calc(var(--u) * 3.4);
+  background: var(--android-frame);
+  box-shadow: 0 0 0 calc(var(--u) * 0.25) #2a2d35 inset, 0 0 0 1px #3a3e48;
+}
+.phone--android .phone-screen {
+  inset: calc(var(--u) * 0.9);
+  border-radius: calc(var(--u) * 2.6);
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+.phone-punch { position: absolute; z-index: 4; top: calc(var(--u) * 1.9); left: 50%; transform: translateX(-50%); width: calc(var(--u) * 1.7); height: calc(var(--u) * 1.7); border-radius: 50%; background: #05060a; }
+.phone--android .phone-status { height: calc(var(--u) * 4.2); color: var(--app-text); }
+.sim-flag {
+  font-size: var(--fs-2xs); font-weight: 700;
+  color: #9a5b00; background: #ffe7b3;
+  padding: 0 var(--sp-1); border-radius: var(--r-sm);
+  opacity: 0; transition: opacity var(--t-med);
+}
+.sim-flag.is-shown { opacity: 1; }
+
+.app-bar { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); background: var(--app-brand); color: #fff; font-weight: 700; font-size: var(--fs-xs); flex: none; }
+.app-bar svg { width: calc(var(--u) * 1.8); height: calc(var(--u) * 1.8); }
+.app-bar-title { flex: 1; }
+.app-bar-user { font-weight: 500; font-size: var(--fs-2xs); opacity: .85; }
+
+.app-screens { position: relative; flex: 1; }
+.app-screen {
+  position: absolute; inset: 0;
+  padding: var(--sp-4);
+  display: flex; flex-direction: column; gap: var(--sp-3);
+  opacity: 0; transform: translateX(calc(var(--u) * 2));
+  transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease);
+  pointer-events: none;
+}
+.app-screen.is-active { opacity: 1; transform: none; }
+.app-h { font-size: var(--fs-lg); font-weight: 750; letter-spacing: -0.01em; color: var(--app-text); }
+.field { display: flex; flex-direction: column; gap: 2px; }
+.field-label { font-size: var(--fs-2xs); color: var(--app-text-2); }
+.field-input { font-size: var(--fs-xs); font-weight: 600; background: var(--app-surface); border: 1px solid var(--app-line); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); display: flex; justify-content: space-between; align-items: center; min-height: calc(var(--u) * 3.6); }
+.field-input .mono { font-family: var(--font-mono); letter-spacing: .08em; }
+.field-tick { width: calc(var(--u) * 1.6); height: calc(var(--u) * 1.6); color: #18a06a; opacity: 0; transition: opacity var(--t-fast); }
+.field.is-ok .field-tick { opacity: 1; }
+.field.is-ok .field-input { border-color: #7fd8b3; }
+.app-btn { font-size: var(--fs-xs); font-weight: 750; text-align: center; padding: var(--sp-3); border-radius: var(--r-md); background: var(--app-brand); color: #fff; }
+.app-btn--ghost { background: transparent; color: var(--app-brand); border: 1px solid var(--app-brand); }
+
+.app-result {
+  display: flex; align-items: center; gap: var(--sp-2);
+  font-size: var(--fs-xs); font-weight: 700;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  min-height: calc(var(--u) * 4.2);
+  background: #e4f6ee; color: #0f7a50;
+  opacity: 0; transition: opacity var(--t-med);
+}
+.app-result svg { width: calc(var(--u) * 1.8); height: calc(var(--u) * 1.8); flex: none; }
+.app-result.is-shown { opacity: 1; }
+
+.acct-card { background: var(--app-brand); color: #fff; border-radius: var(--r-lg); padding: var(--sp-4); }
+.acct-card-label { font-size: var(--fs-2xs); opacity: .85; }
+.acct-card-amount { font-size: var(--fs-xl); font-weight: 750; margin-top: var(--sp-1); letter-spacing: -0.01em; }
+.quick-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
+.quick-action { background: var(--app-surface); border: 1px solid var(--app-line); border-radius: var(--r-md); padding: var(--sp-3); font-size: var(--fs-2xs); font-weight: 650; display: flex; flex-direction: column; gap: var(--sp-2); }
+.quick-action svg { width: calc(var(--u) * 2); height: calc(var(--u) * 2); color: var(--app-brand); }
+
+.transfer-amount { font-size: var(--fs-2xl); font-weight: 800; letter-spacing: -0.02em; line-height: 1; color: var(--app-text); }
+.transfer-meta { font-size: var(--fs-2xs); color: var(--app-text-2); }
+.transfer-status {
+  border-radius: var(--r-lg);
+  padding: var(--sp-3);
+  min-height: calc(var(--u) * 7.6);
+  display: flex; flex-direction: column; justify-content: center; gap: 2px;
+  background: #eef1f6; color: var(--app-text-2);
+  transition: background var(--t-med), color var(--t-med);
+}
+.transfer-status-title { font-size: var(--fs-sm); font-weight: 800; display: flex; align-items: center; gap: var(--sp-2); }
+.transfer-status-title svg { width: calc(var(--u) * 2); height: calc(var(--u) * 2); flex: none; }
+.transfer-status-sub { font-size: var(--fs-2xs); }
+.transfer-status.is-held { background: #fff0e0; color: #b04d00; box-shadow: 0 0 0 2px #ff8a3c inset; }
+
+.spinner { width: calc(var(--u) * 1.8); height: calc(var(--u) * 1.8); border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; flex: none; }
+
+/* Session restricted overlay on the attacker phone */
+.phone-lockout {
+  position: absolute; inset: 0; z-index: 5;
+  background: linear-gradient(180deg, #5c0d1f, #2a0610);
+  color: #fff;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  gap: var(--sp-3);
+  padding: var(--sp-5);
+  opacity: 0; transform: scale(1.04);
+  transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease);
+}
+.phone-lockout.is-shown { opacity: 1; transform: none; }
+.lockout-icon { width: calc(var(--u) * 7); height: calc(var(--u) * 7); border-radius: 50%; background: var(--band-critical); display: grid; place-items: center; }
+.lockout-icon svg { width: 50%; height: 50%; }
+.lockout-title { font-size: var(--fs-xl); font-weight: 800; letter-spacing: -0.01em; line-height: 1.1; }
+.lockout-sub { font-size: var(--fs-xs); color: #ffd0da; }
+.lockout-retry { width: 100%; display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-3); }
+.lockout-retry-btn { font-size: var(--fs-xs); font-weight: 700; padding: var(--sp-3); border-radius: var(--r-md); border: 1px solid rgba(255, 255, 255, .4); transition: background var(--t-fast); }
+.lockout-retry-btn.is-pressed { background: rgba(255, 255, 255, .18); }
+.lockout-refused { font-size: var(--fs-xs); font-weight: 700; color: #fff; background: rgba(255, 77, 109, .5); border-radius: var(--r-md); padding: var(--sp-2); min-height: calc(var(--u) * 5.4); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity var(--t-med); }
+.lockout-refused.is-shown { opacity: 1; }
+
+/* ==========================================================================
+   Center column: AI Defender
+   ========================================================================== */
+.column--defender { gap: calc(var(--u) * 1); }
+
+.caption {
+  position: relative;
+  flex: none;
+  height: calc(var(--u) * 10.4);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line);
+  background: var(--ink-900);
+  padding: var(--sp-3) var(--sp-5);
+  display: flex; flex-direction: column; justify-content: center;
+  overflow: hidden;
+  transition: background var(--t-slow) var(--ease), border-color var(--t-slow);
+}
+.caption-kicker { font-size: var(--fs-sm); font-weight: 750; color: var(--band-color); transition: color var(--t-med); }
+.caption-kicker[data-tone="ai"] { color: var(--ai); }
+.caption-kicker[data-tone="protected"] { color: var(--protected); }
+.caption-text { font-size: calc(var(--u) * 2.7); font-weight: 650; line-height: 1.22; margin-top: var(--sp-1); letter-spacing: -0.005em; }
+.caption-body { transition: opacity var(--t-med); }
+.finale { position: absolute; inset: 0; padding: var(--sp-2) var(--sp-5); display: flex; flex-direction: column; justify-content: center; gap: var(--sp-1); opacity: 0; transition: opacity var(--t-slow); color: #04140d; }
+.finale-title { font-size: calc(var(--u) * 2.5); font-weight: 850; letter-spacing: 0.005em; line-height: 1.08; text-wrap: balance; }
+.finale-line { font-size: var(--fs-sm); font-weight: 650; line-height: 1.28; }
+.caption.is-finale { background: var(--protected); border-color: var(--protected); }
+.caption.is-finale .caption-body { opacity: 0; }
+.caption.is-finale .finale { opacity: 1; }
+
+.defender-grid {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: calc(var(--u) * 1);
+}
+.panel {
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--ink-900);
+  padding: calc(var(--u) * 1) var(--sp-4);
+  display: flex; flex-direction: column;
+}
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); flex: none; }
+.panel-title { font-size: var(--fs-md); font-weight: 750; letter-spacing: -0.005em; }
+.panel-meta { font-size: var(--fs-2xs); color: var(--text-3); text-align: right; }
+.subhead { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-xs); font-weight: 700; color: var(--text-2); margin-top: var(--sp-2); flex: none; }
+.subhead-meta { font-size: var(--fs-2xs); font-weight: 500; color: var(--text-3); }
+
+/* Risk gauge (hero) */
+.risk-gauge { display: grid; grid-template-columns: calc(var(--u) * 21.5) 1fr; gap: var(--sp-4); align-items: center; margin-top: var(--sp-2); flex: none; }
+.risk-dial { position: relative; width: 100%; aspect-ratio: 1 / 0.9; }
+.risk-dial svg { width: 100%; height: 100%; overflow: visible; }
+.risk-dial-track { fill: none; stroke-width: 9; stroke-linecap: butt; opacity: .28; }
+.risk-dial-track.is-reached { opacity: .5; }
+.risk-dial-value { fill: none; stroke: var(--band-color); stroke-width: 15; stroke-linecap: round; transition: stroke-dasharray var(--t-slow) var(--ease), stroke var(--t-med); }
+.risk-dial-readout { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding-top: 6%; }
+.risk-score { font-size: var(--fs-score); font-weight: 800; line-height: .9; letter-spacing: -0.04em; color: var(--text); }
+.risk-score-of { font-size: var(--fs-xs); color: var(--text-3); margin-top: var(--sp-1); }
+.risk-band-name { font-size: var(--fs-md); font-weight: 800; color: var(--band-color); margin-top: var(--sp-1); transition: color var(--t-med); line-height: 1; }
+.risk-dial.is-bump .risk-score { animation: bump var(--t-slow) var(--ease); }
+
+.band-list { list-style: none; display: flex; flex-direction: column; gap: var(--sp-1); }
+.band-row {
+  display: grid; grid-template-columns: calc(var(--u) * 6.4) 1fr; align-items: center; gap: var(--sp-2);
+  padding: calc(var(--u) * 0.5) var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  color: var(--text-3);
+  transition: background var(--t-med), border-color var(--t-med), color var(--t-med);
+}
+.band-range { font-family: var(--font-mono); font-size: var(--fs-2xs); }
+.band-name { font-size: var(--fs-xs); font-weight: 750; }
+.band-action { grid-column: 2; font-size: var(--fs-2xs); line-height: 1.25; }
+.band-row[data-band="low"] { --c: var(--band-low); }
+.band-row[data-band="elevated"] { --c: var(--band-elevated); }
+.band-row[data-band="high"] { --c: var(--band-high); }
+.band-row[data-band="critical"] { --c: var(--band-critical); }
+.band-row .band-name { color: var(--c); opacity: .65; }
+.band-row.is-current { background: color-mix(in srgb, var(--c) 16%, transparent); border-color: var(--c); color: var(--text); }
+.band-row.is-current .band-name { opacity: 1; }
+
+/* Risk signals: the full model is always listed, so it doubles as the legend */
+.signal-list { list-style: none; display: flex; flex-direction: column; gap: var(--sp-1); margin-top: var(--sp-2); flex: 1; min-height: 0; }
+.signal {
+  position: relative;
+  display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: var(--sp-3);
+  padding: calc(var(--u) * 0.5) var(--sp-3) calc(var(--u) * 0.5) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--ink-850);
+  color: var(--text-3);
+  transition: background var(--t-med), color var(--t-med);
+}
+.signal::before { content: ""; position: absolute; left: 0; top: 18%; bottom: 18%; width: 3px; border-radius: 2px; background: var(--line); transition: background var(--t-med); }
+.signal-name { font-size: var(--fs-xs); font-weight: 700; }
+.signal-detail { grid-column: 1; font-size: var(--fs-2xs); line-height: 1.25; }
+.signal-points { grid-row: 1 / span 2; grid-column: 2; font-size: var(--fs-lg); font-weight: 800; letter-spacing: -0.02em; font-family: var(--font-mono); }
+.signal[data-band="low"] { --c: var(--band-low); }
+.signal[data-band="elevated"] { --c: var(--band-elevated); }
+.signal[data-band="high"] { --c: var(--band-high); }
+.signal[data-band="critical"] { --c: var(--band-critical); }
+.signal:not(.is-fired) .signal-points { opacity: .5; }
+.signal.is-fired { background: color-mix(in srgb, var(--c) 13%, var(--ink-850)); color: var(--text); }
+.signal.is-fired::before { background: var(--c); }
+.signal.is-fired .signal-points { color: var(--c); }
+.signal.is-fired .signal-detail { color: var(--text-2); }
+.signal.is-new { animation: flashIn var(--t-slow) var(--ease); }
+
+/* Protective actions */
+.actions { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: var(--sp-2); margin-top: var(--sp-2); flex: none; }
+.action-tile {
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--ink-850);
+  padding: var(--sp-2) var(--sp-3);
+  min-height: calc(var(--u) * 6.6);
+  display: flex; flex-direction: column; justify-content: center;
+  transition: background var(--t-med), border-color var(--t-med);
+}
+.action-label { font-size: var(--fs-2xs); color: var(--text-3); }
+.action-value { font-size: var(--fs-md); font-weight: 800; line-height: 1.1; margin-top: 2px; color: var(--text-2); transition: color var(--t-med); }
+.action-sub { font-size: var(--fs-2xs); color: var(--text-3); min-height: 1.3em; }
+.action-tile.is-warn { border-color: var(--line-strong); }
+.action-tile.is-warn .action-value { color: var(--text); }
+.action-tile.is-held { background: color-mix(in srgb, var(--band-high) 20%, var(--ink-850)); border-color: var(--band-high); }
+.action-tile.is-held .action-value { color: var(--band-high); }
+.action-tile.is-held .action-sub { color: var(--text); }
+.action-tile.is-restricted { background: color-mix(in srgb, var(--band-critical) 20%, var(--ink-850)); border-color: var(--band-critical); }
+.action-tile.is-restricted .action-value { color: var(--band-critical); }
+.action-tile.is-restricted .action-sub { color: var(--text); }
+.action-tile.is-open { background: color-mix(in srgb, var(--ai) 16%, var(--ink-850)); border-color: var(--ai); }
+.action-tile.is-open .action-value { color: var(--ai); }
+.action-tile.is-open .action-sub { color: var(--text); }
+.action-tile.is-new { animation: flashIn var(--t-slow) var(--ease); }
+
+/* Investigation */
+.tool-list { list-style: none; display: flex; flex-direction: column; gap: var(--sp-1); margin-top: var(--sp-2); flex: 1; min-height: 0; overflow: hidden; position: relative; }
+.tool-empty { font-size: var(--fs-xs); color: var(--text-3); padding: var(--sp-3); border: 1px dashed var(--line); border-radius: var(--r-md); }
+.tool-call {
+  display: grid; grid-template-columns: calc(var(--u) * 2) 1fr; column-gap: var(--sp-2); align-items: start;
+  padding: calc(var(--u) * 0.35) var(--sp-2);
+  border-radius: var(--r-sm);
+  animation: rise var(--t-med) var(--ease);
+}
+.tool-icon { width: calc(var(--u) * 1.7); height: calc(var(--u) * 1.7); margin-top: 0.15em; color: var(--ai); grid-row: 1 / span 2; display: grid; place-items: center; }
+.tool-icon svg { width: 100%; height: 100%; }
+.tool-icon .spinner { width: 100%; height: 100%; }
+.tool-name { font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: 700; color: var(--ai); line-height: 1.3; }
+.tool-result { font-size: var(--fs-2xs); color: var(--text-2); line-height: 1.3; }
+.tool-call.is-running { background: color-mix(in srgb, var(--ai) 10%, transparent); }
+.tool-call.is-running .tool-result { color: var(--text-3); font-style: italic; }
+.tool-call.is-done .tool-result { color: var(--text); }
+
+.verdict {
+  flex: none;
+  margin-top: var(--sp-2);
+  border-radius: var(--r-md);
+  border: 1px dashed var(--line);
+  padding: var(--sp-3) var(--sp-3);
+  min-height: calc(var(--u) * 14.5);
+  display: flex; flex-direction: column;
+  position: relative;
+  transition: background var(--t-med), border-color var(--t-med);
+}
+.verdict-empty { font-size: var(--fs-xs); color: var(--text-3); margin: auto 0; }
+.verdict-content { display: none; flex-direction: column; }
+.verdict.is-shown { border-style: solid; border-color: var(--ai); background: color-mix(in srgb, var(--ai) 12%, var(--ink-900)); }
+.verdict.is-shown .verdict-empty { display: none; }
+.verdict.is-shown .verdict-content { display: flex; animation: rise var(--t-med) var(--ease); }
+.verdict-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); }
+.verdict-title { font-size: var(--fs-lg); font-weight: 800; color: var(--text); letter-spacing: -0.01em; line-height: 1.1; }
+.verdict-by { font-size: var(--fs-2xs); color: var(--ai); font-weight: 700; white-space: nowrap; }
+.verdict-text { font-size: var(--fs-xs); color: var(--text-2); margin-top: var(--sp-2); line-height: 1.38; }
+.verdict-action { margin-top: var(--sp-2); display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); font-weight: 750; flex-wrap: wrap; }
+.verdict-action-label { color: var(--text-3); font-weight: 500; }
+.verdict-action-value { color: var(--text); background: color-mix(in srgb, var(--band-critical) 22%, transparent); border: 1px solid var(--band-critical); padding: 0 var(--sp-2); border-radius: var(--r-sm); }
+.verdict-action-note { font-size: var(--fs-2xs); color: var(--text-3); font-weight: 500; }
+
+/* Audit log: two columns of five rows, newest last, never scrolls */
+.audit-log { flex: none; height: calc(var(--u) * 14.2); }
+.audit-list {
+  list-style: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: repeat(5, 1fr);
+  grid-auto-flow: column;
+  column-gap: var(--sp-5);
+  margin-top: calc(var(--u) * 0.5);
+  flex: 1; min-height: 0;
+}
+.audit-empty { grid-column: 1 / -1; grid-row: 1; font-size: var(--fs-xs); color: var(--text-3); align-self: center; }
+.audit-entry {
+  display: grid; grid-template-columns: calc(var(--u) * 7.6) 1fr auto; align-items: center; gap: var(--sp-2);
+  border-bottom: 1px solid var(--ink-700);
+  min-width: 0;
+  animation: rise var(--t-med) var(--ease);
+}
+.audit-time { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); }
+.audit-text { font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.audit-source { font-size: var(--fs-2xs); font-weight: 700; padding: 0 var(--sp-2); border-radius: var(--r-sm); white-space: nowrap; }
+.audit-source[data-source="auth"] { color: var(--text-2); background: var(--ink-700); }
+.audit-source[data-source="telco"] { color: var(--band-elevated); background: rgba(255, 197, 61, .12); }
+.audit-source[data-source="session"] { color: var(--attacker); background: rgba(255, 111, 145, .12); }
+.audit-source[data-source="gateway"] { color: var(--band-high); background: rgba(255, 138, 60, .14); }
+.audit-source[data-source="agent"] { color: var(--ai); background: rgba(183, 156, 255, .14); }
+.audit-source[data-source="risk"] { color: var(--band-low); background: rgba(110, 168, 255, .14); }
+
+/* HOLD / RESTRICTED stamp over the center column */
+.moment {
+  position: absolute; inset: 0; z-index: 20;
+  display: grid; place-items: center;
+  background: rgba(7, 16, 31, .72);
+  border-radius: var(--r-lg);
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--t-fast);
+}
+.moment.is-shown { opacity: 1; }
+.moment-card {
+  text-align: center;
+  padding: var(--sp-5) var(--sp-6);
+  border-radius: var(--r-lg);
+  border: calc(var(--u) * 0.5) solid var(--mc, var(--band-high));
+  background: color-mix(in srgb, var(--mc, var(--band-high)) 18%, var(--ink-950));
+}
+.moment[data-kind="hold"] { --mc: var(--band-high); }
+.moment[data-kind="restrict"] { --mc: var(--band-critical); }
+.moment.is-shown .moment-card { animation: stamp 520ms cubic-bezier(.2, 1.4, .4, 1); }
+.moment-title { font-size: var(--fs-stamp); font-weight: 900; letter-spacing: 0.01em; line-height: 1; color: var(--mc); }
+.moment-sub { font-size: var(--fs-lg); font-weight: 650; margin-top: var(--sp-3); color: var(--text); }
+.moment-by { font-size: var(--fs-xs); color: var(--text-2); margin-top: var(--sp-2); }
+
+/* Utility */
+.app.is-instant *, .app.is-instant *::before, .app.is-instant *::after { transition: none !important; animation: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@keyframes pulse { 50% { box-shadow: 0 0 0 calc(var(--u) * 0.8) rgba(255, 111, 145, 0); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes rise { from { opacity: 0; transform: translateY(calc(var(--u) * 0.8)); } to { opacity: 1; transform: none; } }
+@keyframes flashIn { 0% { filter: brightness(1.9); } 100% { filter: none; } }
+@keyframes bump { 0% { transform: scale(1); } 30% { transform: scale(1.12); } 100% { transform: scale(1); } }
+@keyframes stamp { 0% { transform: scale(1.35); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+  .spinner { animation: none !important; border-right-color: currentColor; opacity: .6; }
+}
+</style>
+</head>
+<body>
+<div class="app" id="app" data-band="low">
+
+  <!-- ===================== Top bar ===================== -->
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M16 2.5 4.5 7v8.2c0 7 4.9 12.6 11.5 14.3 6.6-1.7 11.5-7.3 11.5-14.3V7L16 2.5Z" fill="none" stroke="#eef3fb" stroke-width="2"/>
+        <path d="M10.5 22.5v-8.2a5.5 5.5 0 0 1 11 0v8.2l-1.8-1.4-1.9 1.4-1.8-1.4-1.8 1.4-1.9-1.4-1.8 1.4Z" fill="#34d896"/>
+        <circle cx="14" cy="14.6" r="1.2" fill="#0b1628"/><circle cx="18" cy="14.6" r="1.2" fill="#0b1628"/>
+      </svg>
+      <span class="brand-name">Ghost Login Defender</span>
+      <span class="sim-tag">SIMULATION - synthetic data</span>
+    </div>
+    <ol class="event-chips" id="eventChips" aria-label="Attack events"></ol>
+    <div class="sim-clock" aria-label="Simulated clock">
+      <span class="sim-clock-label">Simulated time</span>
+      <span class="sim-clock-time" id="clock">01:59<small>:40</small></span>
+    </div>
+    <div class="controls">
+      <button class="ctrl ctrl--primary" id="btnPlay" type="button" title="Play or pause (Space)">
+        <svg viewBox="0 0 16 16" aria-hidden="true" id="playIcon"><path d="M4 2.5v11l9-5.5-9-5.5Z" fill="currentColor"/></svg>
+        <span id="playLabel">Start attack</span>
+      </button>
+      <button class="ctrl" id="btnNext" type="button" title="Next step (Right arrow)" aria-label="Next step">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5v11l7-5.5-7-5.5Z" fill="currentColor"/><rect x="11" y="2.5" width="2" height="11" fill="currentColor"/></svg>
+      </button>
+      <button class="ctrl" id="btnRestart" type="button" title="Restart (R)" aria-label="Restart">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8a4.8 4.8 0 1 0 1.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M3 1.8v3.4h3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <div class="progress" aria-hidden="true"><i class="progress-bar" id="progress"></i></div>
+  </header>
+
+  <main class="stage-grid">
+
+    <!-- ===================== LEFT: Real customer ===================== -->
+    <section class="column column--customer" aria-label="Real customer">
+      <div class="column-head">
+        <div class="column-role">Real customer</div>
+        <div class="column-title">Layla Hassan</div>
+        <span class="presence" id="customerPresence"></span>
+        <div class="column-sub">iPhone 15 Pro, trusted device</div>
+      </div>
+
+      <div class="phone phone--iphone" id="customerPhone">
+        <div class="phone-screen">
+          <div class="phone-island"></div>
+          <div class="phone-status">
+            <span class="no-service" id="noService">No service</span>
+            <span class="phone-status-right">
+              <svg viewBox="0 0 18 12" aria-hidden="true"><path d="M9 11.2 6.6 8.6a3.4 3.4 0 0 1 4.8 0L9 11.2Zm-4-4.3L3.4 5.2a8 8 0 0 1 11.2 0L13 6.9a5.7 5.7 0 0 0-8 0Zm-2.9-3L.5 2.2a12 12 0 0 1 17 0L15.9 3.9a9.8 9.8 0 0 0-13.8 0Z" fill="currentColor"/></svg>
+              <svg viewBox="0 0 26 12" aria-hidden="true"><rect x=".6" y=".6" width="22" height="10.8" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5" stroke-width="1.2"/><rect x="2.4" y="2.4" width="13" height="7.2" rx="1.6" fill="currentColor"/><path d="M24 4v4c.9-.3 1.4-1.1 1.4-2s-.5-1.7-1.4-2Z" fill="currentColor" fill-opacity=".5"/></svg>
+            </span>
+          </div>
+          <div class="phone-dim"></div>
+          <div class="lock">
+            <span class="lock-focus">
+              <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M7.6 1A5 5 0 1 0 11 8.4 4.2 4.2 0 0 1 7.6 1Z" fill="currentColor"/></svg>
+              Sleep
+            </span>
+            <div class="lock-date">Saturday 21 November</div>
+            <div class="lock-time" id="lockTime">1:59</div>
+
+            <div class="bank-widget" id="bankWidget">
+              <div class="bank-widget-label"><span>Current account</span><span>Demo Bank</span></div>
+              <div class="bank-widget-amount" id="customerBalance">AED 92,000</div>
+              <div class="bank-widget-status" id="balanceStatus">No recent activity</div>
+            </div>
+
+            <div class="push" id="push" aria-live="polite">
+              <div class="push-head">
+                <span class="push-icon"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 2.5 3.8v4c0 3.3 2.3 6 5.5 6.8 3.2-.8 5.5-3.5 5.5-6.8v-4L8 1.5Z" fill="#fff"/></svg></span>
+                <span class="push-app">Demo Bank security</span>
+                <span>now</span>
+              </div>
+              <div class="push-title" id="pushTitle">Did you request AED 85,000 to Orion Trading FZE?</div>
+              <div class="push-body">We held this payment. No money has left your account.</div>
+              <div class="push-actions">
+                <span class="push-btn push-btn--deny">No, it wasn't me</span>
+                <span class="push-btn">Yes, it was me</span>
+              </div>
+            </div>
+
+            <div class="lock-bottom">
+              <span class="lock-round"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 1.5h5l-1 4v8.5h-3V5.5l-1-4Z" fill="#fff"/></svg></span>
+              <span class="lock-round"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5h2.5l1.2-2h4.6l1.2 2H14v8H2V5Z" fill="none" stroke="#fff" stroke-width="1.4"/><circle cx="8" cy="9" r="2.3" fill="none" stroke="#fff" stroke-width="1.4"/></svg></span>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+
+      <p class="column-note" id="customerNote"></p>
+    </section>
+
+    <!-- ===================== CENTER: AI Defender ===================== -->
+    <section class="column column--defender" aria-label="AI Defender">
+      <div class="caption" id="caption" aria-live="polite">
+        <div class="caption-body">
+          <div class="caption-kicker" id="captionKicker"></div>
+          <div class="caption-text" id="captionText"></div>
+        </div>
+        <div class="finale" id="finale">
+          <div class="finale-title" id="finaleTitle"></div>
+          <div class="finale-line" id="finaleLine"></div>
+        </div>
+      </div>
+
+      <div class="defender-grid">
+        <!-- Risk engine -->
+        <section class="panel panel--risk" aria-label="Risk engine">
+          <div class="panel-head">
+            <h2 class="panel-title">Risk engine</h2>
+            <span class="panel-meta">Deterministic rules, points per signal</span>
+          </div>
+          <div class="risk-gauge">
+            <div class="risk-dial" id="riskDial">
+              <svg viewBox="0 0 200 180" aria-hidden="true" id="riskDialSvg"></svg>
+              <div class="risk-dial-readout">
+                <div class="risk-score" id="riskScore">0</div>
+                <div class="risk-score-of">risk score of 100</div>
+                <div class="risk-band-name" id="riskBandName">Low</div>
+              </div>
+            </div>
+            <ol class="band-list" id="bandList"></ol>
+          </div>
+          <div class="subhead"><span>Signals</span><span class="subhead-meta">Demo weights, not a calibrated model</span></div>
+          <ul class="signal-list" id="signalList"></ul>
+        </section>
+
+        <!-- Response: actions + AI investigation -->
+        <section class="panel panel--response" aria-label="Response">
+          <div class="panel-head">
+            <h2 class="panel-title">Protective actions</h2>
+            <span class="panel-meta">Executed by the payment gateway, in code</span>
+          </div>
+          <div class="actions">
+            <div class="action-tile" id="actPayment"><span class="action-label">Payment</span><span class="action-value"></span><span class="action-sub"></span></div>
+            <div class="action-tile" id="actSession"><span class="action-label">Session</span><span class="action-value"></span><span class="action-sub"></span></div>
+            <div class="action-tile" id="actIncident"><span class="action-label">Incident</span><span class="action-value"></span><span class="action-sub"></span></div>
+          </div>
+
+          <div class="subhead"><span>AI investigation agent</span><span class="subhead-meta">Recommends and explains, does not execute</span></div>
+          <ol class="tool-list" id="toolList"></ol>
+
+          <div class="verdict" id="verdict">
+            <div class="verdict-empty">The verdict appears when the investigation finishes.</div>
+            <div class="verdict-content">
+              <div class="verdict-head">
+                <span class="verdict-title" id="verdictTitle"></span>
+                <span class="verdict-by">AI verdict</span>
+              </div>
+              <p class="verdict-text" id="verdictText"></p>
+              <div class="verdict-action">
+                <span class="verdict-action-label">Recommended</span>
+                <span class="verdict-action-value" id="verdictAction"></span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel audit-log" aria-label="Audit log">
+        <div class="panel-head">
+          <h2 class="panel-title">Audit log</h2>
+          <span class="panel-meta">Every event and action, in order</span>
+        </div>
+        <ol class="audit-list" id="auditList"></ol>
+      </section>
+
+      <div class="moment" id="moment" aria-live="assertive">
+        <div class="moment-card">
+          <div class="moment-title" id="momentTitle"></div>
+          <div class="moment-sub" id="momentSub"></div>
+          <div class="moment-by" id="momentBy"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== RIGHT: Attacker ===================== -->
+    <section class="column column--attacker" aria-label="Attacker">
+      <div class="column-head">
+        <div class="column-role">Attacker</div>
+        <div class="column-title">Unknown device</div>
+        <span class="presence" id="attackerPresence"></span>
+        <div class="column-sub">Samsung Galaxy A54, first seen tonight</div>
+      </div>
+
+      <div class="phone phone--android" id="attackerPhone">
+        <div class="phone-screen">
+          <div class="phone-punch"></div>
+          <div class="phone-status">
+            <span class="phone-status-left"><span id="attackerTime">01:59</span><span class="sim-flag" id="simFlag">New SIM</span></span>
+            <span class="phone-status-right">
+              <svg viewBox="0 0 16 12" aria-hidden="true"><path d="M1 11h2V8H1v3Zm4 0h2V6H5v5Zm4 0h2V3H9v8Zm4 0h2V0h-2v11Z" fill="currentColor"/></svg>
+              <svg viewBox="0 0 24 12" aria-hidden="true"><rect x=".6" y=".6" width="20" height="10.8" rx="2" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="2.4" y="2.4" width="9" height="7.2" rx="1" fill="currentColor"/><rect x="21.6" y="4" width="1.8" height="4" rx=".6" fill="currentColor"/></svg>
+            </span>
+          </div>
+          <div class="app-bar">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 2.5 3.8v4c0 3.3 2.3 6 5.5 6.8 3.2-.8 5.5-3.5 5.5-6.8v-4L8 1.5Z" fill="#fff"/></svg>
+            <span class="app-bar-title">Demo Bank</span>
+            <span class="app-bar-user" id="appBarUser"></span>
+          </div>
+
+          <div class="app-screens">
+            <!-- Login -->
+            <div class="app-screen" data-screen="login">
+              <div class="app-h">Sign in</div>
+              <div class="field is-ok"><span class="field-label">Customer ID</span><span class="field-input">layla.hassan</span></div>
+              <div class="field" id="fieldPassword"><span class="field-label">Password</span><span class="field-input"><span class="mono" id="passwordDots"></span><svg class="field-tick" viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8.5 3.2 3L13 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div>
+              <div class="field" id="fieldOtp"><span class="field-label">SMS code</span><span class="field-input"><span class="mono" id="otpValue"></span><svg class="field-tick" viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8.5 3.2 3L13 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div>
+              <div class="app-btn">Sign in</div>
+              <div class="app-result" id="loginResult"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="currentColor"/><path d="m4.6 8.3 2.3 2.2 4.5-4.6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Login successful</div>
+            </div>
+
+            <!-- Home -->
+            <div class="app-screen" data-screen="home">
+              <div class="app-h">Welcome back, Layla</div>
+              <div class="acct-card"><div class="acct-card-label">Current account</div><div class="acct-card-amount">AED 92,000</div></div>
+              <div class="quick-actions">
+                <div class="quick-action"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5h10M9 2l3 3-3 3M14 11H4M7 8l-3 3 3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Transfer</div>
+                <div class="quick-action"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M1.5 14c.4-2.6 2.2-4 4.5-4s4.1 1.4 4.5 4M12.5 5v5M10 7.5h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Beneficiaries</div>
+              </div>
+            </div>
+
+            <!-- Add beneficiary -->
+            <div class="app-screen" data-screen="beneficiary">
+              <div class="app-h">Add beneficiary</div>
+              <div class="field"><span class="field-label">Name</span><span class="field-input">Orion Trading FZE</span></div>
+              <div class="field"><span class="field-label">IBAN (synthetic)</span><span class="field-input"><span class="mono">AE07 0000 1234 5678</span></span></div>
+              <div class="app-btn">Add beneficiary</div>
+              <div class="app-result" id="beneficiaryResult"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="currentColor"/><path d="m4.6 8.3 2.3 2.2 4.5-4.6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Beneficiary added</div>
+            </div>
+
+            <!-- Transfer -->
+            <div class="app-screen" data-screen="transfer">
+              <div class="app-h">Transfer</div>
+              <div>
+                <div class="transfer-meta">To Orion Trading FZE</div>
+                <div class="transfer-amount" id="transferAmount">AED 85,000</div>
+                <div class="transfer-meta">From current account, AED 92,000</div>
+              </div>
+              <div class="app-btn">Send now</div>
+              <div class="transfer-status" id="transferStatus">
+                <div class="transfer-status-title" id="transferStatusTitle"></div>
+                <div class="transfer-status-sub" id="transferStatusSub"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="phone-lockout" id="lockout">
+            <div class="lockout-icon"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7.5" rx="1.5" fill="#fff"/><path d="M5.2 7V5a2.8 2.8 0 0 1 5.6 0v2" fill="none" stroke="#fff" stroke-width="1.6"/></svg></div>
+            <div class="lockout-title">Session restricted</div>
+            <div class="lockout-sub">Payments are blocked in this session. The transfer is on hold - under review.</div>
+            <div class="lockout-retry">
+              <div class="lockout-retry-btn" id="retryBtn">Retry transfer</div>
+              <div class="lockout-refused" id="retryRefused">Request refused</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="column-note" id="attackerNote"></p>
+    </section>
+  </main>
+</div>
+
+<script>
+'use strict';
+/* =============================================================================
+   1. Static configuration. In the real dashboard this comes from the API.
+   ============================================================================= */
+const RISK_MODEL = {
+  signals: [
+    { id: 'unknown_device',  label: 'Unknown device',          points: 15, hint: 'Session on a device never seen before' },
+    { id: 'sim_swap',        label: 'Recent SIM swap',         points: 25, hint: 'Telco reports a new SIM on this number' },
+    { id: 'unusual_network', label: 'Unusual network',         points: 10, hint: 'Network or location unlike the customer' },
+    { id: 'new_beneficiary', label: 'New beneficiary',         points: 15, hint: 'Payee added in the current session' },
+    { id: 'large_amount',    label: 'Unusually large amount',  points: 20, hint: 'Far above the typical transfer' },
+    { id: 'rapid_sequence',  label: 'Rapid sequence',          points: 15, hint: 'Login, new payee and transfer in minutes' }
+  ],
+  bands: [
+    { id: 'low',      min: 0,  max: 29,  label: 'Low',      action: 'Monitor' },
+    { id: 'elevated', min: 30, max: 59,  label: 'Elevated', action: 'Extra verification' },
+    { id: 'high',     min: 60, max: 79,  label: 'High',     action: 'Hold payment' },
+    { id: 'critical', min: 80, max: 100, label: 'Critical', action: 'Hold + restrict session + incident' }
+  ]
+};
+const EVENT_TYPES = ['LOGIN', 'SIM_SWAP', 'ADD_BENEFICIARY', 'TRANSFER'];
+
+const bandFor = score => RISK_MODEL.bands.find(b => score >= b.min && score <= b.max);
+const money = n => 'AED ' + n.toLocaleString('en-US');
+
+/* =============================================================================
+   2. State. One plain object; render(state) draws everything from it.
+   ============================================================================= */
+function initialState() {
+  return {
+    stage: 0,
+    clock: '01:59:40',
+    events: EVENT_TYPES.map(type => ({ type, status: 'idle' })),     // idle | active | done
+    caption: { kicker: 'Before the attack', tone: '', text: '01:59 at night. Layla is asleep and her trusted iPhone is idle.' },
+    finale: null,                                                     // { title, line }
+    moment: null,                                                     // { kind: 'hold' | 'restrict', title, sub, by }
+    customer: {
+      name: 'Layla Hassan',
+      device: 'iPhone 15 Pro',
+      balance: 92000,
+      balanceStatus: 'idle',                                          // idle | unchanged
+      presence: 'asleep',                                             // asleep | notified
+      serviceAlert: false,
+      notification: null,                                             // { amount, beneficiary }
+      note: { text: 'Her phone has had no service since 01:15. She has not noticed.', tone: 'normal' }
+    },
+    attacker: {
+      device: 'Samsung Galaxy A54',
+      screen: 'login',                                                // login | home | beneficiary | transfer
+      login: { password: 'empty', otp: 'empty', result: 'pending' },  // empty | typed | ok
+      simFlag: false,
+      beneficiaryStatus: 'draft',                                     // draft | added
+      transferStatus: 'draft',                                        // draft | sending | held
+      retry: 'none',                                                  // none | pressed | refused
+      note: { text: 'Has Layla\'s password, phished by a fake bank SMS earlier today.', tone: 'hostile' }
+    },
+    risk: { score: 0, band: 'low', signals: [] },                     // signals: [{ id, points, detail, band }]
+    payment: { status: 'none', amount: null, beneficiary: null, debited: false }, // none | requested | held
+    session: { status: 'none' },                                      // none | active | restricted
+    investigation: { status: 'idle', toolCalls: [] },                 // toolCalls: [{ name, status: running|done, result }]
+    incident: null,                                                   // { id, status }
+    verdict: null,                                                    // { title, explanation, action }
+    audit: []                                                         // [{ time, text, source }]
+  };
+}
+
+/* State helpers used by the script (pure data changes, no DOM) */
+function fireSignal(s, id, detail) {
+  const def = RISK_MODEL.signals.find(x => x.id === id);
+  s.risk.score = Math.min(100, s.risk.score + def.points);
+  s.risk.band = bandFor(s.risk.score).id;
+  s.risk.signals.push({ id, points: def.points, detail, band: s.risk.band });
+}
+function setEvent(s, type, status) { s.events.find(e => e.type === type).status = status; }
+function log(s, text, source) { s.audit.push({ time: s.clock, text, source }); }
+function startTool(s, name) { s.investigation.toolCalls.push({ name, status: 'running', result: null }); }
+function finishTool(s, name, result) { const t = s.investigation.toolCalls.find(x => x.name === name); t.status = 'done'; t.result = result; }
+
+/* =============================================================================
+   3. Script: a list of state changes over time (ms from start).
+   ============================================================================= */
+const TOOLS = [
+  ['get_device_history()',  'Samsung Galaxy A54: unknown device. iPhone 15 Pro: trusted.'],
+  ['get_sim_status()',      'SIM swap confirmed 45 min before login (synthetic signal).'],
+  ['get_session_activity()','Login -> new beneficiary -> transfer within 3 minutes.'],
+  ['get_payment_history()', 'Typical transfer about AED 3,000; this one is AED 85,000.'],
+  ['check_beneficiary()',   'Orion Trading FZE: never paid before, added in this session.'],
+  ['create_incident()',     'INC-0001 opened.']
+];
+
+const SCRIPT = [
+  /* ---- Stage 1: LOGIN ---- */
+  { t: 700, stage: 1, apply(s) {
+      s.stage = 1; s.clock = '02:00:03'; setEvent(s, 'LOGIN', 'active');
+      s.attacker.login.password = 'typed';
+      s.caption = { kicker: 'Step 1 of 4 - LOGIN', text: 'An unknown phone signs in to Layla\'s account with her phished password.' };
+  } },
+  { t: 1900, stage: 1, apply(s) { s.clock = '02:00:05'; s.attacker.login.password = 'ok'; s.attacker.login.otp = 'typed'; } },
+  { t: 3000, stage: 1, apply(s) {
+      s.clock = '02:00:07'; s.attacker.login.otp = 'ok';
+      s.caption = { kicker: 'Step 1 of 4 - LOGIN', text: 'The SMS code is correct too. To the bank, this login looks valid.' };
+  } },
+  { t: 3900, stage: 1, apply(s) {
+      s.clock = '02:00:08'; s.attacker.login.result = 'ok'; s.session.status = 'active';
+      log(s, 'Login OK on unknown device', 'auth');
+  } },
+  { t: 5000, stage: 1, apply(s) {
+      s.attacker.screen = 'home';
+      fireSignal(s, 'unknown_device', 'Galaxy A54, first seen tonight. Not proof of fraud alone.');
+      s.caption = { kicker: 'Risk 15 - Low - Monitor', text: 'A new device alone is not proof of fraud. People buy new phones. The engine keeps watching.' };
+  } },
+
+  /* ---- Stage 2: SIM_SWAP ---- */
+  { t: 8600, stage: 2, apply(s) {
+      s.stage = 2; s.clock = '02:01:02'; setEvent(s, 'LOGIN', 'done'); setEvent(s, 'SIM_SWAP', 'active');
+      s.caption = { kicker: 'Step 2 of 4 - SIM_SWAP', text: 'A telco signal arrives for Layla\'s phone number.' };
+      log(s, 'Telco: SIM swapped at 01:15', 'telco');
+  } },
+  { t: 9700, stage: 2, apply(s) {
+      fireSignal(s, 'sim_swap', 'SIM swapped at 01:15, 45 min before login');
+      s.customer.serviceAlert = true; s.attacker.simFlag = true;
+      s.attacker.note = { text: 'Receives Layla\'s SMS codes on the swapped SIM. That is how the code was correct.', tone: 'hostile' };
+      s.caption = { kicker: 'Risk 40 - Elevated - Extra verification', text: 'The SIM was swapped 45 minutes before login. The SMS code no longer proves it is Layla.' };
+  } },
+
+  /* ---- Stage 3: ADD_BENEFICIARY ---- */
+  { t: 13800, stage: 3, apply(s) {
+      s.stage = 3; s.clock = '02:02:05'; setEvent(s, 'SIM_SWAP', 'done'); setEvent(s, 'ADD_BENEFICIARY', 'active');
+      s.attacker.screen = 'beneficiary';
+      s.caption = { kicker: 'Step 3 of 4 - ADD_BENEFICIARY', text: 'The session adds a new beneficiary: Orion Trading FZE.' };
+  } },
+  { t: 15200, stage: 3, apply(s) {
+      s.clock = '02:02:10'; s.attacker.beneficiaryStatus = 'added';
+      log(s, 'Beneficiary added: Orion Trading FZE', 'session');
+  } },
+  { t: 16200, stage: 3, apply(s) {
+      fireSignal(s, 'new_beneficiary', 'Orion Trading FZE, added in this session');
+      s.caption = { kicker: 'Risk 55 - Elevated - Extra verification', text: 'Unknown device, new SIM, new payee. Any payment now needs extra checks.' };
+  } },
+
+  /* ---- Stage 4: TRANSFER ---- */
+  { t: 19800, stage: 4, apply(s) {
+      s.stage = 4; s.clock = '02:03:01'; setEvent(s, 'ADD_BENEFICIARY', 'done'); setEvent(s, 'TRANSFER', 'active');
+      s.attacker.screen = 'transfer'; s.attacker.transferStatus = 'sending';
+      s.payment = { status: 'requested', amount: 85000, beneficiary: 'Orion Trading FZE', debited: false };
+      log(s, 'Transfer requested: AED 85,000', 'session');
+      s.caption = { kicker: 'Step 4 of 4 - TRANSFER', text: 'The attacker requests AED 85,000 to Orion Trading FZE.' };
+  } },
+  { t: 21200, stage: 4, apply(s) {
+      fireSignal(s, 'large_amount', 'AED 85,000 vs typical AED 3,000 (28x)');
+      s.caption = { kicker: 'Risk 75 - High - Hold payment', text: 'The amount is 28 times her typical transfer. Risk crosses 60.' };
+  } },
+  { t: 22300, stage: 4, apply(s) {
+      s.clock = '02:03:02'; s.payment.status = 'held'; s.attacker.transferStatus = 'held';
+      s.moment = { kind: 'hold', title: 'PAYMENT ON HOLD', sub: 'AED 85,000 held before debit', by: 'Payment gateway, by code, at risk 75' };
+      log(s, 'Payment held before debit (risk 75)', 'gateway');
+  } },
+  { t: 24600, stage: 4, apply(s) {
+      s.moment = null;
+      fireSignal(s, 'rapid_sequence', 'Login to transfer in 3 minutes');
+      s.caption = { kicker: 'Risk 90 - Critical - Restrict session', text: 'Login, new payee and a large transfer in 3 minutes. Risk crosses 80.' };
+  } },
+  { t: 25700, stage: 4, apply(s) {
+      s.clock = '02:03:03'; s.session.status = 'restricted';
+      s.moment = { kind: 'restrict', title: 'SESSION RESTRICTED', sub: 'No more payments from this session', by: 'Payment gateway, by code, at risk 90' };
+      s.attacker.note = { text: 'The transfer is frozen and the session can no longer move money.', tone: 'hostile' };
+      log(s, 'Session restricted (risk 90)', 'gateway');
+  } },
+  { t: 28000, stage: 4, apply(s) {
+      s.moment = null; s.investigation.status = 'running';
+      s.caption = { kicker: 'AI investigation', tone: 'ai', text: 'The agent calls tools to collect evidence. The money is already safe.' };
+  } },
+  ...TOOLS.flatMap(([name, result], i) => {
+    const t0 = 28400 + i * 1500;
+    const sec = String(4 + i).padStart(2, '0');
+    return [
+      { t: t0, stage: 4, apply(s) { s.clock = '02:03:' + sec; startTool(s, name); } },
+      { t: t0 + 950, stage: 4, apply(s) {
+          finishTool(s, name, result);
+          if (name === 'create_incident()') { s.incident = { id: 'INC-0001', status: 'open' }; log(s, 'Incident INC-0001 opened', 'agent'); }
+      } }
+    ];
+  }),
+  { t: 37800, stage: 4, apply(s) {
+      s.clock = '02:03:10'; s.investigation.status = 'done';
+      s.verdict = {
+        title: 'Likely account takeover',
+        explanation: 'The session runs on an unknown Galaxy A54 while the trusted iPhone 15 Pro is idle. The SIM was swapped 45 min before login, so the SMS code proves nothing. In 3 minutes it added a never-paid beneficiary and asked for AED 85,000, 28x the usual AED 3,000.',
+        action: 'Hold payment + restrict session'
+      };
+      s.caption = { kicker: 'AI verdict', tone: 'ai', text: 'The agent explains the decision from its tool results. Code took the actions.' };
+  } },
+  { t: 39600, stage: 4, apply(s) {
+      s.clock = '02:03:11';
+      s.customer.presence = 'notified'; s.customer.balanceStatus = 'unchanged';
+      s.customer.notification = { amount: 85000, beneficiary: 'Orion Trading FZE' };
+      s.customer.note = { text: 'Verification goes to the trusted device by push, not by SMS to the swapped SIM.', tone: 'key' };
+      log(s, 'Verification sent to trusted iPhone', 'gateway');
+      s.caption = { kicker: 'Verification', tone: 'protected', text: 'Layla\'s trusted iPhone wakes up with a push. Her balance has not changed.' };
+  } },
+  { t: 41200, stage: 4, apply(s) { s.clock = '02:03:14'; s.attacker.retry = 'pressed'; } },
+  { t: 42000, stage: 4, apply(s) {
+      s.attacker.retry = 'refused';
+      log(s, 'Retry refused: session restricted', 'gateway');
+  } },
+
+  /* ---- Stage 5: finale ---- */
+  { t: 43800, stage: 5, apply(s) {
+      s.stage = 5; setEvent(s, 'TRANSFER', 'done');
+      s.finale = {
+        title: 'ACCOUNT TAKEOVER CONTAINED • AED 85,000 PROTECTED (SIMULATION)',
+        line: 'Password correct. SMS code correct. Login successful. The agent still spotted a stranger\'s session and stopped the transfer before the money left.'
+      };
+  } }
+];
+const SCRIPT_END = SCRIPT[SCRIPT.length - 1].t;
+
+/* =============================================================================
+   4. Rendering. render(state) is idempotent; lists are keyed and synced.
+   ============================================================================= */
+const $ = id => document.getElementById(id);
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+const ICONS = {
+  chevron: '<svg class="event-sep" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  check: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m4.8 8.2 2.2 2.2 4.2-4.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  moon: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M7.6 1A5 5 0 1 0 11 8.4 4.2 4.2 0 0 1 7.6 1Z" fill="currentColor"/></svg>',
+  bell: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8a4.2 4.2 0 0 0-4.2 4.2v3L2.5 11.5h11L12.2 9V6A4.2 4.2 0 0 0 8 1.8ZM6.3 13a1.8 1.8 0 0 0 3.4 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+  dot: '<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.5" fill="currentColor"/></svg>',
+  lock: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7.5" rx="1.5" fill="currentColor"/><path d="M5.2 7V5a2.8 2.8 0 0 1 5.6 0v2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
+  pause: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z" fill="currentColor"/><path d="M6.3 5v6M9.7 5v6" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  shieldCheck: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 2.5 3.8v4c0 3.3 2.3 6 5.5 6.8 3.2-.8 5.5-3.5 5.5-6.8v-4L8 1.5Z" fill="currentColor"/><path d="m5.3 8.2 1.8 1.8 3.6-3.7" fill="none" stroke="#04140d" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+};
+
+/* One-time DOM scaffolding for config-driven parts */
+function buildStatic() {
+  $('eventChips').innerHTML = EVENT_TYPES.map((t, i) =>
+    (i ? '<li aria-hidden="true">' + ICONS.chevron + '</li>' : '') +
+    '<li class="event-chip" data-type="' + t + '"><span class="event-chip-dot"></span>' + t + '</li>').join('');
+
+  $('bandList').innerHTML = RISK_MODEL.bands.map(b =>
+    '<li class="band-row" data-band="' + b.id + '"><span class="band-range">' + b.min + '-' + b.max + '</span>' +
+    '<span class="band-name">' + b.label + '</span><span class="band-action">' + b.action + '</span></li>').join('');
+
+  $('signalList').innerHTML = RISK_MODEL.signals.map(sg =>
+    '<li class="signal" data-signal="' + sg.id + '"><span class="signal-name">' + sg.label + '</span>' +
+    '<span class="signal-detail"></span><span class="signal-points">+' + sg.points + '</span></li>').join('');
+
+  // Dial: 270 degree arc, band segments as background, value arc on top.
+  const cx = 100, cy = 100, r = 78;
+  const pt = deg => { const a = deg * Math.PI / 180; return [(cx + r * Math.cos(a)).toFixed(2), (cy + r * Math.sin(a)).toFixed(2)]; };
+  const [sx, sy] = pt(135), [ex, ey] = pt(45);
+  const arc = 'M' + sx + ' ' + sy + ' A' + r + ' ' + r + ' 0 1 1 ' + ex + ' ' + ey;
+  const colors = { low: 'var(--band-low)', elevated: 'var(--band-elevated)', high: 'var(--band-high)', critical: 'var(--band-critical)' };
+  let svg = '';
+  RISK_MODEL.bands.forEach(b => {
+    const start = b.min, len = (b.max === 100 ? 100 : b.max + 1) - b.min;
+    svg += '<path class="risk-dial-track" data-band="' + b.id + '" d="' + arc + '" pathLength="100" stroke="' + colors[b.id] +
+      '" stroke-dasharray="' + (len - 0.8) + ' 200" stroke-dashoffset="' + (-start) + '"/>';
+  });
+  svg += '<path class="risk-dial-value" id="riskValueArc" d="' + arc + '" pathLength="100" stroke-dasharray="0 200"/>';
+  $('riskDialSvg').innerHTML = svg;
+}
+
+/* Score tween: the number counts up, everything else is CSS transitions */
+let shownScore = 0, scoreAnim = 0;
+function tweenScore(target, instant) {
+  cancelAnimationFrame(scoreAnim);
+  if (instant || reducedMotion.matches) { shownScore = target; $('riskScore').textContent = target; return; }
+  const from = shownScore, t0 = performance.now(), dur = 700;
+  const step = now => {
+    const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+    shownScore = Math.round(from + (target - from) * e);
+    $('riskScore').textContent = shownScore;
+    if (k < 1) scoreAnim = requestAnimationFrame(step);
+  };
+  scoreAnim = requestAnimationFrame(step);
+}
+
+let prev = null;
+function render(state, opts = {}) {
+  const instant = !!opts.instant;
+  const p = prev || initialState();
+  const app = $('app');
+  if (instant) { app.classList.add('is-instant'); requestAnimationFrame(() => requestAnimationFrame(() => app.classList.remove('is-instant'))); }
+  const band = RISK_MODEL.bands.find(b => b.id === state.risk.band);
+  app.dataset.band = state.risk.band;
+  app.dataset.moment = state.moment ? state.moment.kind : '';
+
+  /* Top bar */
+  const [hh, mm, ss] = state.clock.split(':');
+  $('clock').innerHTML = hh + ':' + mm + '<small>:' + ss + '</small>';
+  state.events.forEach(ev => {
+    const chip = document.querySelector('.event-chip[data-type="' + ev.type + '"]');
+    chip.classList.toggle('is-active', ev.status === 'active');
+    chip.classList.toggle('is-done', ev.status === 'done');
+  });
+
+  /* Caption / finale */
+  $('captionKicker').textContent = state.caption.kicker;
+  $('captionKicker').dataset.tone = state.caption.tone || '';
+  $('captionText').textContent = state.caption.text;
+  $('caption').classList.toggle('is-finale', !!state.finale);
+  if (state.finale) { $('finaleTitle').textContent = state.finale.title; $('finaleLine').textContent = state.finale.line; }
+
+  /* Customer */
+  const c = state.customer;
+  $('lockTime').textContent = String(Number(hh)) + ':' + mm;
+  $('customerBalance').textContent = money(c.balance);
+  $('noService').classList.toggle('is-alert', c.serviceAlert);
+  $('customerPhone').classList.toggle('is-awake', c.presence === 'notified');
+  $('bankWidget').classList.toggle('is-protected', c.balanceStatus === 'unchanged');
+  $('balanceStatus').innerHTML = c.balanceStatus === 'unchanged'
+    ? ICONS.check + '<span>Unchanged - nothing debited</span>' : 'No recent activity';
+  $('push').classList.toggle('is-shown', !!c.notification);
+  if (c.notification) $('pushTitle').textContent = 'Did you request ' + money(c.notification.amount) + ' to ' + c.notification.beneficiary + '?';
+  setPresence($('customerPresence'), c.presence === 'notified' ? ['is-alert', ICONS.bell, 'Notified'] : ['', ICONS.moon, 'Asleep']);
+  setNote($('customerNote'), c.note);
+
+  /* Attacker */
+  const a = state.attacker;
+  $('attackerTime').textContent = hh + ':' + mm;
+  document.querySelectorAll('.app-screen').forEach(el => el.classList.toggle('is-active', el.dataset.screen === a.screen));
+  $('appBarUser').textContent = state.session.status === 'none' ? '' : 'Layla H.';
+  $('passwordDots').textContent = a.login.password === 'empty' ? '' : '•'.repeat(10);
+  $('otpValue').textContent = a.login.otp === 'empty' ? '' : '482 913';
+  $('fieldPassword').classList.toggle('is-ok', a.login.password === 'ok');
+  $('fieldOtp').classList.toggle('is-ok', a.login.otp === 'ok');
+  $('loginResult').classList.toggle('is-shown', a.login.result === 'ok');
+  $('simFlag').classList.toggle('is-shown', a.simFlag);
+  $('beneficiaryResult').classList.toggle('is-shown', a.beneficiaryStatus === 'added');
+  const ts = $('transferStatus');
+  ts.classList.toggle('is-held', a.transferStatus === 'held');
+  if (a.transferStatus === 'held') {
+    $('transferStatusTitle').innerHTML = ICONS.pause + '<span>On hold - under review</span>';
+    $('transferStatusSub').textContent = 'Not debited. The bank is checking this payment.';
+  } else if (a.transferStatus === 'sending') {
+    $('transferStatusTitle').innerHTML = '<span class="spinner"></span><span>Sending</span>';
+    $('transferStatusSub').textContent = 'Processing your transfer';
+  } else { $('transferStatusTitle').textContent = ''; $('transferStatusSub').textContent = ''; }
+  $('lockout').classList.toggle('is-shown', state.session.status === 'restricted');
+  $('retryBtn').classList.toggle('is-pressed', a.retry !== 'none');
+  $('retryRefused').classList.toggle('is-shown', a.retry === 'refused');
+  $('retryRefused').textContent = 'Request refused. Session restricted.';
+  const ap = state.session.status === 'restricted' ? ['is-blocked', ICONS.lock, 'Restricted']
+    : state.session.status === 'active' ? ['is-hostile', ICONS.dot, 'Logged in'] : ['', ICONS.dot, 'Signing in'];
+  setPresence($('attackerPresence'), ap);
+  setNote($('attackerNote'), a.note);
+
+  /* Risk engine */
+  if (state.risk.score !== p.risk.score || instant) {
+    tweenScore(state.risk.score, instant);
+    if (!instant && state.risk.score > p.risk.score && !reducedMotion.matches) restartAnim($('riskDial'), 'is-bump');
+  }
+  $('riskBandName').textContent = band.label;
+  $('riskValueArc').setAttribute('stroke-dasharray', Math.max(0.01, state.risk.score) + ' 200');
+  document.querySelectorAll('.risk-dial-track').forEach(el => {
+    const b = RISK_MODEL.bands.find(x => x.id === el.dataset.band);
+    el.classList.toggle('is-reached', state.risk.score >= b.min && state.risk.score > 0);
+  });
+  document.querySelectorAll('.band-row').forEach(el => el.classList.toggle('is-current', el.dataset.band === band.id));
+  RISK_MODEL.signals.forEach(def => {
+    const el = document.querySelector('.signal[data-signal="' + def.id + '"]');
+    const fired = state.risk.signals.find(x => x.id === def.id);
+    const wasFired = p.risk.signals.some(x => x.id === def.id);
+    el.classList.toggle('is-fired', !!fired);
+    el.dataset.band = fired ? fired.band : '';
+    el.querySelector('.signal-detail').textContent = fired ? fired.detail : def.hint;
+    if (fired && !wasFired && !instant) restartAnim(el, 'is-new');
+  });
+
+  /* Protective actions */
+  const pay = state.payment;
+  setTile($('actPayment'), pay.status === 'held' ? ['is-held', 'On hold', 'Before debit']
+    : pay.status === 'requested' ? ['is-warn', money(pay.amount), 'Requested'] : ['', 'None', 'No payment yet'], p.payment.status !== pay.status && !instant);
+  const ses = state.session.status;
+  setTile($('actSession'), ses === 'restricted' ? ['is-restricted', 'Restricted', 'No payments']
+    : ses === 'active' ? ['is-warn', 'Active', 'Monitored'] : ['', 'None', 'Not logged in'], p.session.status !== ses && !instant);
+  setTile($('actIncident'), state.incident ? ['is-open', state.incident.id, 'Open'] : ['', 'None', 'Not opened'], !!state.incident !== !!p.incident && !instant);
+
+  /* Investigation */
+  syncList($('toolList'), state.investigation.toolCalls, tc => tc.name, () => {
+    const li = document.createElement('li'); li.className = 'tool-call';
+    li.innerHTML = '<span class="tool-icon"></span><span class="tool-name"></span><span class="tool-result"></span>'; return li;
+  }, (li, tc) => {
+    li.classList.toggle('is-running', tc.status === 'running');
+    li.classList.toggle('is-done', tc.status === 'done');
+    li.querySelector('.tool-icon').innerHTML = tc.status === 'running' ? '<span class="spinner"></span>' : ICONS.check;
+    li.querySelector('.tool-name').textContent = tc.name;
+    li.querySelector('.tool-result').textContent = tc.status === 'running' ? 'running...' : tc.result;
+  }, 'Waiting. The agent starts once the gateway has acted.', 'tool-empty');
+
+  const v = state.verdict;
+  $('verdict').classList.toggle('is-shown', !!v);
+  if (v) {
+    $('verdictTitle').textContent = v.title; $('verdictText').textContent = v.explanation;
+    $('verdictAction').textContent = v.action;
+  }
+
+  /* Audit log: show the latest 10 (two columns of five) */
+  const SOURCES = { auth: 'Auth', telco: 'Telco', session: 'Session', gateway: 'Gateway', agent: 'AI agent', risk: 'Risk engine' };
+  syncList($('auditList'), state.audit.slice(-10), e => e.time + e.text, () => {
+    const li = document.createElement('li'); li.className = 'audit-entry';
+    li.innerHTML = '<span class="audit-time"></span><span class="audit-text"></span><span class="audit-source"></span>'; return li;
+  }, (li, e) => {
+    li.querySelector('.audit-time').textContent = e.time;
+    li.querySelector('.audit-text').textContent = e.text;
+    li.title = e.text;
+    const src = li.querySelector('.audit-source'); src.textContent = SOURCES[e.source]; src.dataset.source = e.source;
+  }, 'No events yet.', 'audit-empty');
+
+  /* Moment stamp */
+  const m = state.moment;
+  $('moment').classList.toggle('is-shown', !!m);
+  if (m) { $('moment').dataset.kind = m.kind; $('momentTitle').textContent = m.title; $('momentSub').textContent = m.sub; $('momentBy').textContent = m.by; }
+
+  prev = structuredClone(state);
+}
+
+function setPresence(el, [cls, icon, label]) {
+  el.className = 'presence' + (cls ? ' ' + cls : '');
+  el.innerHTML = icon + '<span>' + label + '</span>';
+}
+function setNote(el, note) {
+  el.textContent = note.text;
+  el.className = 'column-note' + (note.tone === 'key' ? ' is-key' : note.tone === 'hostile' ? ' is-hostile' : '');
+}
+function setTile(el, [cls, value, sub], changed) {
+  el.className = 'action-tile' + (cls ? ' ' + cls : '');
+  el.querySelector('.action-value').textContent = value;
+  el.querySelector('.action-sub').textContent = sub;
+  if (changed && cls) restartAnim(el, 'is-new');
+}
+function restartAnim(el, cls) { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+
+/* Keyed list sync: reuse nodes by key so entry animations play once */
+function syncList(root, items, keyOf, create, update, emptyText, emptyClass) {
+  const keep = new Set(items.map(keyOf));
+  [...root.children].forEach(ch => { if (!keep.has(ch.dataset.key)) ch.remove(); });
+  if (!items.length) {
+    const empty = document.createElement('li'); empty.className = emptyClass; empty.textContent = emptyText; empty.dataset.key = '__empty';
+    root.appendChild(empty); return;
+  }
+  items.forEach(item => {
+    const key = keyOf(item);
+    let el = [...root.children].find(ch => ch.dataset.key === key);
+    if (!el) { el = create(); el.dataset.key = key; root.appendChild(el); }
+    update(el, item);
+  });
+}
+
+/* =============================================================================
+   5. Player: walks the script. Play/pause, next step, restart, jump to stage.
+   ============================================================================= */
+const player = { state: initialState(), cursor: 0, elapsed: 0, playing: false, last: 0, raf: 0 };
+
+function applyNext() { SCRIPT[player.cursor].apply(player.state); player.cursor++; }
+
+function tick(now) {
+  if (!player.playing) return;
+  player.elapsed += now - player.last; player.last = now;
+  let changed = false;
+  while (player.cursor < SCRIPT.length && SCRIPT[player.cursor].t <= player.elapsed) { applyNext(); changed = true; }
+  if (changed) render(player.state);
+  updateControls();
+  if (player.cursor >= SCRIPT.length) { player.playing = false; updateControls(); return; }
+  player.raf = requestAnimationFrame(tick);
+}
+function play() {
+  if (player.cursor >= SCRIPT.length) restart();
+  player.playing = true; player.last = performance.now();
+  cancelAnimationFrame(player.raf); player.raf = requestAnimationFrame(tick); updateControls();
+}
+function pause() { player.playing = false; cancelAnimationFrame(player.raf); updateControls(); }
+function togglePlay() { player.playing ? pause() : play(); }
+function nextStep() {
+  pause();
+  if (player.cursor >= SCRIPT.length) return;
+  player.elapsed = SCRIPT[player.cursor].t; applyNext(); render(player.state); updateControls();
+}
+function restart() {
+  pause(); player.state = initialState(); player.cursor = 0; player.elapsed = 0;
+  render(player.state, { instant: true }); updateControls();
+}
+function jumpToStage(n) {
+  restart();
+  while (player.cursor < SCRIPT.length && SCRIPT[player.cursor].stage <= n) applyNext();
+  player.elapsed = player.cursor ? SCRIPT[player.cursor - 1].t : 0;
+  player.state.moment = null;
+  render(player.state, { instant: true }); updateControls();
+}
+function updateControls() {
+  const done = player.cursor >= SCRIPT.length;
+  const label = player.playing ? 'Pause' : done ? 'Replay' : player.cursor === 0 ? 'Start attack' : 'Resume';
+  $('playLabel').textContent = label;
+  $('btnPlay').classList.toggle('is-playing', player.playing);
+  $('playIcon').innerHTML = player.playing
+    ? '<rect x="3.5" y="2.5" width="3" height="11" fill="currentColor"/><rect x="9.5" y="2.5" width="3" height="11" fill="currentColor"/>'
+    : '<path d="M4 2.5v11l9-5.5-9-5.5Z" fill="currentColor"/>';
+  $('progress').style.width = Math.min(100, player.elapsed / SCRIPT_END * 100) + '%';
+}
+
+$('btnPlay').addEventListener('click', togglePlay);
+$('btnNext').addEventListener('click', nextStep);
+$('btnRestart').addEventListener('click', restart);
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); nextStep(); }
+  else if (e.key === 'r' || e.key === 'R') { restart(); }
+});
+
+/* Boot */
+buildStatic();
+const params = new URLSearchParams(location.search);
+const stageParam = params.get('stage');
+if (stageParam !== null && !isNaN(Number(stageParam))) jumpToStage(Math.max(0, Math.min(5, Number(stageParam))));
+else restart();
+if (params.get('autoplay') === '1') play();
+</script>
+</body>
+</html>
