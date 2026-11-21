@@ -899,3 +899,6 @@ button:disabled { cursor: default; }
 /* Hidden, not removed, so the agent header does not jump when no investigation ran. */
 .subhead--agent:has(.engine-badge[aria-hidden="true"]) .engine-badge,
 .engine-reason[aria-hidden="true"] { visibility: hidden; }
+
+/* The gateway kept a stronger action than the investigator recommended. */
+.verdict-overruled { color: var(--protected); background: color-mix(in srgb, var(--protected) 14%, transparent); border: 1px solid var(--protected); padding: 0 var(--sp-2); border-radius: var(--r-sm); font-size: var(--fs-2xs); font-weight: 700; }
