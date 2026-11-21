@@ -31,7 +31,8 @@ export interface BankState {
   seq: number;
   /** Increases on every reset. Async work started before a reset must not write into the new state. */
   epoch: number;
-  clock: { simulatedMs: number; realMs: number };
+  /** `capMs` stops now() while a scenario waits for its next scripted step. Null means free running. */
+  clock: { simulatedMs: number; realMs: number; capMs: number | null };
   customer: Customer;
   devices: Device[];
   sessions: Session[];
@@ -133,7 +134,7 @@ function seedState(epoch: number, startAt: ISODateTime): BankState {
   return {
     seq: 0,
     epoch,
-    clock: { simulatedMs: Date.parse(startAt), realMs: Date.now() },
+    clock: { simulatedMs: Date.parse(startAt), realMs: Date.now(), capMs: null },
     customer: {
       id: SEED_CUSTOMER_ID,
       name: "Layla Hassan",
