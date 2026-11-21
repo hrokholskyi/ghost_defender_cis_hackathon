@@ -167,3 +167,25 @@ Design canvas with three new directions (ledger, night log, poster) was rejected
 The decision log had infrastructure details that should not be public (my mistake); they were removed and the history of `main` was rewritten, so commit ids before this entry changed.
 Devin will also do real development tasks from the fix list through pull requests, so the repository shows Devin as a developer and not only as the runtime investigator.
 Lesson for this log: record decisions and reasons, never hostnames, tunnel names, key handling or names of other projects.
+
+## 2026-11-21 - Backend review fixes merged
+
+All seven review defects are fixed test-first, 152 tests pass.
+The gateway now records the threshold crossings: `PAYMENT_HELD` names the running score that reached High (75 in scenario B) and `SESSION_RESTRICTED` the one that reached Critical (90), so the staged hold on screen matches the audit log.
+A DENY proof may now cancel every open payment of the same suspicious session, because a sibling payment's own verification can target another session or be undeliverable.
+Accepted timestamps are limited to a strict ISO format and the years 2000 to 2099; a far in-range date still moves the simulated clock forward.
+The millisecond comparison also fixed a second bug: a transfer one second before login used to fire RAPID_SEQUENCE.
+An oversized request body answers 400, not 413, to avoid a new error code.
+Because the history of `main` was rewritten while this agent worked, its commits were cherry-picked, not merged, so the old history did not come back.
+
+## 2026-11-21 - Lint traversed agent worktrees
+
+`eslint` also linted the full repo copies under `.claude/worktrees/`, which made it slow and made it fail when an agent deleted files mid-run.
+`.claude/**` is now in the ESLint ignore list.
+
+## 2026-11-21 - Devin does development tasks through pull requests
+
+Each task is one Devin session created through the v3 API with the repository attached, a brief with acceptance criteria, and a pull request against `main`.
+First tasks: dashboard recovery after a server restart (PR 1, needs a rebase after the backend fixes), an "overruled by the gateway" mark on the verdict card, and audit entries in cause-and-effect order.
+Tasks are split so that files do not overlap between open pull requests; the presenter-proofing task waits for PR 1 because both change `use-dashboard.ts`.
+Each pull request is reviewed and tested locally, then merged with a merge commit to keep Devin's authorship visible.
