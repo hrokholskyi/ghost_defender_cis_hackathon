@@ -463,7 +463,7 @@ function topbar(d: Derived): TopBarView {
     autoplay: ui.autoplay,
     busy: ui.pending !== null,
     reachable: ui.reachable,
-    investigator: s.llm.configured && s.llm.model ? `${ENGINES.devin.status} (${s.llm.model})` : ENGINES[engine].status,
+    investigator: s.llm.configured && s.llm.model ? `Investigator: ${s.llm.model}` : ENGINES[engine].status,
     investigatorEngine: engine,
     error: ui.actionError,
   };
