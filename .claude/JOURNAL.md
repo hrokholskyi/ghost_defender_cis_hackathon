@@ -65,3 +65,37 @@ The verdict's `incidentId` always comes from a real `create_incident` result, ne
 `create_incident` input from an engine is validated before it reaches the core.
 The default engine cap is 45 s, which was sized for Claude; the Devin engine must pass a larger `engineTimeoutMs`.
 For Devin, the HTTP tool endpoint must map tool names to methods on the tracked `tools` object and reject unknown names; the orchestrator does not do that.
+
+## 2026-11-21 - Bank core merged; integration miss on the engine id
+
+The core branch still wrote engine id `"claude"` in `investigations.ts`, because the contract changed to `"devin"` on main after that agent had started.
+Typecheck caught it after the merge; fixed with a one-line commit.
+Lesson: a contract change during parallel work must be sent to every running agent, not only to the one it mainly concerns.
+
+## 2026-11-21 - Core decisions reported by the bank core agent
+
+Routes stay dynamic by reading `request.headers` plus `Cache-Control: no-store`, because `cacheComponents: true` removes `export const dynamic`, and `connection()` throws when a handler is called directly from a test.
+In scenario B a retry of the held payment returns 403 `SESSION_RESTRICTED`, not 409, because the session check runs first; 409 `PAYMENT_HELD` is covered by a separate HIGH (score 60) case.
+The typical amount is the median of all SETTLED payments, not only seed history.
+A trusted device sending a large amount to a known beneficiary scores only 20 (LOW) and is allowed: a known gap of the demo point model, left as is.
+Resets bump an `epoch`, so an investigation started before a reset cannot write into the new state.
+
+## 2026-11-21 - Simulated clock drift found, fix delegated
+
+The clock runs in real time between scripted steps, so a presenter who waits more than 60 s between clicks gets drifted timestamps and wrong "minutes" in the evidence.
+Fix: cap the clock one second before the next scripted step while a scenario has steps left.
+
+## 2026-11-21 - Devin engine built on the recommended options while Roman's answers are pending
+
+Asked Roman twice: (1) which Devin credentials exist, (2) tunnel, server deploy, or no public URL.
+No answer yet, and the hackathon budget is 4 hours, so the engine is being built for the recommended options: v3 API with a `cog_` key, and HTTP tool endpoints on a public URL (`GLD_PUBLIC_URL`).
+No tunnel or deployment is set up without his go-ahead.
+If he picks the legacy v1 key or "no public URL", the client or the tool transport must be reworked.
+
+## 2026-11-21 - Devin engine design
+
+Verdict arrives over two channels, first wins: Devin POSTs it to our `submit_verdict` endpoint (instant), and the backend polls `structured_output` every 10 s as a backup.
+Rejected polling only: 10 s granularity plus session wind-down adds visible delay in a live demo.
+The one-time tool token is put into the prompt, not into `session_secrets`: the runtime behaviour of session secrets is unverified, and the token is bound to one investigation, seven calls, and 10 minutes.
+A `proxy.ts` guard makes only `/api/investigations/tools/*` reachable on the public host, because `/api/state` returns simulator session tokens.
+Engine cap for Devin is 240 s (`GLD_DEVIN_TIMEOUT_MS`), since session duration is undocumented.
