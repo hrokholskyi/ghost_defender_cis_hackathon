@@ -99,3 +99,17 @@ Rejected polling only: 10 s granularity plus session wind-down adds visible dela
 The one-time tool token is put into the prompt, not into `session_secrets`: the runtime behaviour of session secrets is unverified, and the token is bound to one investigation, seven calls, and 10 minutes.
 A `proxy.ts` guard makes only `/api/investigations/tools/*` reachable on the public host, because `/api/state` returns simulator session tokens.
 Engine cap for Devin is 240 s (`GLD_DEVIN_TIMEOUT_MS`), since session duration is undocumented.
+
+## 2026-11-21 - Devin engine merged, not yet run against the real API
+
+Built and tested with a fake Devin client and, by the agent, on a real `next start` server against a local fake Devin API that curls our endpoints.
+Deviations from my brief, accepted: `submit_verdict` validates the shape and answers 400 with the bad field so Devin can resubmit (raw pass-through would send one typo straight to the fallback); structured output is also accepted in `waiting_for_user` / `waiting_for_approval`; prompt examples use `<...>` placeholders so they do not bias the verdict.
+Open risk for the first live run: if the tunnel rewrites `Host` to localhost and drops `x-forwarded-host`, the public guard sees every request as local and `/api/state` is exposed. Check `curl <public>/api/state` returns 404 right after starting a tunnel.
+Other unverified points: exact create-session body acceptance, presence of `url` in the response, session duration against the 240 s cap, accepted `devin_mode` values, ACU cost per run.
+
+## 2026-11-21 - Demo becomes a guided explainer with chapters
+
+Roman asked for English subtitles: present and explain the screen sections first, then explain each case.
+Read as: Tour, Case A, Case B, Case C, Closing card, with one bottom subtitle track replacing the top caption row.
+Rejected adding only step subtitles to case B: chapters cover both readings of "case", and `?chapter=b&only=1` still gives the short attack-only run.
+The live dashboard is being ported from the pre-subtitle demo; it keeps its narrator caption for now.
