@@ -283,6 +283,7 @@ function Verdict({ inv, fitRef }: { inv: InvestigationView; fitRef: RefObject<HT
             <div className="verdict-action">
               <span className="verdict-action-label">Recommended</span>
               <span className="verdict-action-value">{v.action}</span>
+              {v.overruledText && <span className="verdict-overruled">{v.overruledText}</span>}
             </div>
           )}
         </div>

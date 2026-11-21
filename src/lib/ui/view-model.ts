@@ -3,6 +3,7 @@
  * dashboard components render. Pure and deterministic; components stay dumb.
  */
 import { RISK_SIGNAL_LABELS } from "@/lib/config";
+import { compareActions } from "@/lib/risk-engine";
 import {
   RISK_SIGNAL_ORDER,
   type AuditEntry,
@@ -184,7 +185,16 @@ export interface InvestigationView {
   items: InvestigationItem[];
   emptyText: string;
   progress: null | { label: string; elapsed: string; note: string };
-  verdict: null | { title: string; text: string; action: string | null; by: string; failed: boolean };
+  verdict: null | {
+    title: string;
+    text: string;
+    action: string | null;
+    by: string;
+    failed: boolean;
+    /** True when the recommendation is weaker than the action the gateway applied to the payment. */
+    overruled: boolean;
+    overruledText: string | null;
+  };
   verdictEmpty: string;
 }
 
@@ -290,6 +300,13 @@ const ACTION_LABELS: Record<RiskAction, string> = {
   STEP_UP: "Extra verification",
   HOLD: "Hold payment",
   HOLD_AND_RESTRICT: "Hold payment + restrict session",
+};
+
+const OVERRULED_TEXTS: Record<RiskAction, string | null> = {
+  ALLOW: null,
+  STEP_UP: "Overruled by the gateway: payment still needs verification.",
+  HOLD: "Overruled by the gateway: payment stays on hold.",
+  HOLD_AND_RESTRICT: "Overruled by the gateway: payment stays on hold, session stays restricted.",
 };
 
 const ACTOR_LABELS: Record<string, string> = {
@@ -1048,14 +1065,24 @@ function investigation(d: Derived): InvestigationView {
         action: null,
         by: eng.verdictBy,
         failed: true,
+        overruled: false,
+        overruledText: null,
       };
     } else {
+      const p = ctx.payment;
+      // Only while the gateway's protection still stands, so the text never contradicts the payment.
+      const overruled =
+        !!p &&
+        (p.status === "HELD" || p.status === "PENDING_VERIFICATION") &&
+        compareActions(inv.verdict.recommendedAction, p.action) < 0;
       verdict = {
         title: ASSESSMENT_TITLES[inv.verdict.assessment],
         text: inv.verdict.summary,
         action: ACTION_LABELS[inv.verdict.recommendedAction],
         by: eng.verdictBy,
         failed: false,
+        overruled,
+        overruledText: overruled && p ? OVERRULED_TEXTS[p.action] : null,
       };
     }
   }
