@@ -203,7 +203,11 @@ function BankApp({ app, onRetry }: { app: AppView; onRetry?: () => void }) {
               >
                 {app.lockout.retry.busy ? "Retrying..." : "Retry transfer"}
               </button>
-              <div className={`lockout-refused${app.lockout.retry.refused ? " is-shown" : ""}`} role="status">
+              <div
+                className={`lockout-refused${app.lockout.retry.refused ? " is-shown" : ""}`}
+                role="status"
+                title={app.lockout.retry.refusedCode ?? undefined}
+              >
                 {app.lockout.retry.refused ?? ""}
               </div>
             </div>

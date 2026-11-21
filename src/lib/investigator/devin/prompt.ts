@@ -2,7 +2,7 @@
  * The Devin prompt and the structured output schema.
  *
  * Why the grant token is written into the prompt: it is one-time, bound to one
- * investigation, limited to the seven tool calls below (with a call cap) and
+ * investigation, limited to the seven tool endpoints below (at most 40 calls) and
  * expires within minutes, and it dies as soon as the verdict is submitted or
  * the run ends. Devin session secrets would keep it out of the prompt, but how
  * they behave at runtime is unverified, and a missing secret would fail the

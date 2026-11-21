@@ -11,7 +11,7 @@ import { acceptSnapshot } from "./accept-snapshot";
 import { api, describeError } from "./api";
 import { planReveal, syncReveal, type Reveal } from "./reveal";
 import { runContext } from "./run-context";
-import { toView, type PendingRequest, type UiState, type View } from "./view-model";
+import { retryRefusalText, toView, type PendingRequest, type UiState, type View } from "./view-model";
 
 const POLL_MS = 500;
 /** Autoplay: about this long between two events. */
@@ -233,7 +233,9 @@ export function useDashboard(): Dashboard {
       ...l,
       retry: r.ok
         ? { status: "done", message: `Payment is ${r.data.payment.status}`, sessionStatus }
-        : { status: "refused", message: r.status === 0 ? r.message : `Request refused: ${r.status} ${r.code}`, sessionStatus },
+        : r.status === 0
+          ? { status: "refused", message: r.message, sessionStatus }
+          : { status: "refused", message: retryRefusalText(r.code, r.message), code: `${r.status} ${r.code}`, sessionStatus },
     }));
     await refresh();
   }, [refresh]);
