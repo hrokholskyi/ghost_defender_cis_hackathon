@@ -152,3 +152,18 @@ Not exercised live: timeout and terminate, suspended or waiting sessions, rate l
 Verdict card now shows the full summary and clamps only when it cannot fit (it still clamps at 1280x720 with the long fallback text).
 Engine badge is hidden until an investigation exists; customer actions in scenarios A and C are tagged "Customer".
 The polish agent ran `agent-browser close --all` and closed a browser session that belonged to other work; briefs must say "close only your own named session".
+
+## 2026-11-21 - Four independent reviews; decisions after them
+
+Backend review found 7 verified defects; the worst was a public-guard bypass when the public host is requested with a port or a trailing dot, so the earlier "guard verified through the tunnel" entry only held for a `Host` header without a port.
+Others: a session on a trusted device could confirm its own held payment; after DENY a second held payment of the same session stayed open; a malformed `at` moved the clock before validation; sub-cent amounts settled without a debit; risk windows were about 30 s wider than documented; a reset did not stop a running investigation.
+Wording review: 13 must-fix items, mainly the hold shown at risk 75 while the gateway recorded only 90, an unmeasured "in milliseconds", the SIM signal not marked synthetic on the main path, and mismatches between demo and dashboard (beneficiary and date in scenario C).
+Decision: make the staged hold literally true in the gateway record (hold when the running score reaches High, restriction when it reaches Critical) instead of weakening the on-screen text.
+Readiness audit: a fresh clone works; the dashboard freezes after a server restart because it ignores snapshots with a lower `seq`; with the tunnel down a Devin run waited the full 240 s cap, so the local cap is now 60 s.
+
+## 2026-11-21 - Roman's decisions on design, the public log and Devin's role
+
+Design canvas with three new directions (ledger, night log, poster) was rejected; the current design stays and a light theme is tried as a variant.
+The decision log had infrastructure details that should not be public (my mistake); they were removed and the history of `main` was rewritten, so commit ids before this entry changed.
+Devin will also do real development tasks from the fix list through pull requests, so the repository shows Devin as a developer and not only as the runtime investigator.
+Lesson for this log: record decisions and reasons, never hostnames, tunnel names, key handling or names of other projects.
