@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { BandRow, InvestigationView, Tile, View } from "@/lib/ui/view-model";
 import { CheckCircle, ErrorCircle, ListIcon } from "./icons";
 import { useTween } from "./motion";
@@ -223,7 +223,41 @@ function ToolList({ inv }: { inv: InvestigationView }) {
   );
 }
 
-function Verdict({ inv }: { inv: InvestigationView }) {
+/**
+ * Shows the whole verdict text. Only when it cannot fit the space the panel leaves it,
+ * clamps to the lines that do fit (the full text stays in the tooltip).
+ */
+function VerdictText({ text, fitRef }: { text: string; fitRef: RefObject<HTMLElement | null> }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const fit = () => {
+      el.style.removeProperty("-webkit-line-clamp");
+      el.classList.remove("is-clamped");
+      if (el.scrollHeight <= el.clientHeight + 1) return;
+      const line = parseFloat(getComputedStyle(el).lineHeight);
+      const lines = Math.max(1, Math.floor(el.clientHeight / line));
+      el.style.setProperty("-webkit-line-clamp", String(lines));
+      el.classList.add("is-clamped");
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    if (fitRef.current) ro.observe(fitRef.current);
+    window.addEventListener("resize", fit);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", fit);
+    };
+  }, [text, fitRef]);
+  return (
+    <p className="verdict-text" ref={ref} title={text}>
+      {text}
+    </p>
+  );
+}
+
+function Verdict({ inv, fitRef }: { inv: InvestigationView; fitRef: RefObject<HTMLElement | null> }) {
   const v = inv.verdict;
   return (
     <div className={`verdict${v ? " is-shown" : ""}${v?.failed ? " is-failed" : ""}${inv.progress ? " is-running" : ""}`}>
@@ -244,9 +278,7 @@ function Verdict({ inv }: { inv: InvestigationView }) {
             <span className="verdict-title">{v.title}</span>
             <span className="verdict-by">{v.by}</span>
           </div>
-          <p className="verdict-text" title={v.text}>
-            {v.text}
-          </p>
+          <VerdictText text={v.text} fitRef={fitRef} />
           {v.action && (
             <div className="verdict-action">
               <span className="verdict-action-label">Recommended</span>
@@ -260,8 +292,9 @@ function Verdict({ inv }: { inv: InvestigationView }) {
 }
 
 function ResponsePanel({ actions, investigation: inv }: Pick<View, "actions" | "investigation">) {
+  const panelRef = useRef<HTMLElement>(null);
   return (
-    <section className="panel panel--response" aria-label="Response">
+    <section className="panel panel--response" aria-label="Response" ref={panelRef}>
       <div className="panel-head">
         <h2 className="panel-title">Protective actions</h2>
         <span className="panel-meta">Executed by the payment gateway, in code</span>
@@ -275,17 +308,15 @@ function ResponsePanel({ actions, investigation: inv }: Pick<View, "actions" | "
       <div className="subhead subhead--agent">
         <span>Devin - AI investigation agent</span>
         <span className="subhead-meta">Recommends and explains, does not execute</span>
-        <span className="engine-badge" data-engine={inv.engine}>
+        <span className="engine-badge" data-engine={inv.engine} aria-hidden={!inv.active}>
           {inv.badge}
         </span>
-        {inv.fallbackReason && (
-          <span className="engine-reason" title={inv.fallbackReason}>
-            Fallback reason: {inv.fallbackReason}
-          </span>
-        )}
+        <span className="engine-reason" title={inv.fallbackReason ?? undefined} aria-hidden={!inv.active || !inv.fallbackReason}>
+          {inv.active && inv.fallbackReason ? `Fallback reason: ${inv.fallbackReason}` : "\u00a0"}
+        </span>
       </div>
       <ToolList inv={inv} />
-      <Verdict inv={inv} />
+      <Verdict inv={inv} fitRef={panelRef} />
     </section>
   );
 }
