@@ -144,6 +144,63 @@ describe("verification on the trusted device", () => {
   });
 });
 
+describe("the customer's answer comes first in the audit log", () => {
+  function seqOf(entries: { seq: number; action: string }[], action: string): number {
+    const entry = entries.find((e) => e.action === action);
+    expect(entry, action).toBeDefined();
+    return entry!.seq;
+  }
+
+  it("logs VERIFICATION_DENIED before the cancellation, revocation and confirmed incident", async () => {
+    const { iphone, verification } = heldScenarioB();
+    await whenIdle();
+    respondToVerification(iphone.token, verification.id, { response: "DENY" });
+    const audit = getSnapshot().audit;
+    const denied = seqOf(audit, "VERIFICATION_DENIED");
+    for (const action of ["PAYMENT_CANCELLED", "SESSION_REVOKED", "INCIDENT_CONFIRMED_ATO"]) {
+      expect(denied, action).toBeLessThan(seqOf(audit, action));
+    }
+  });
+
+  it("logs VERIFICATION_CONFIRMED before the released payment and the lifted restriction", async () => {
+    const { iphone, verification } = heldScenarioB();
+    await whenIdle();
+    respondToVerification(iphone.token, verification.id, { response: "CONFIRM" });
+    const audit = getSnapshot().audit;
+    const confirmed = seqOf(audit, "VERIFICATION_CONFIRMED");
+    for (const action of ["PAYMENT_RELEASED", "PAYMENT_SETTLED", "SESSION_RESTRICTION_LIFTED"]) {
+      expect(confirmed, action).toBeLessThan(seqOf(audit, action));
+    }
+  });
+
+  function answerEntries(verificationId: string) {
+    return getSnapshot().audit.filter(
+      (e) =>
+        (e.action === "VERIFICATION_DENIED" || e.action === "VERIFICATION_CONFIRMED") &&
+        e.data?.verificationId === verificationId,
+    );
+  }
+
+  it("writes no accepted-answer entry for a refused answer", async () => {
+    const { attacker, iphone, verification } = heldScenarioB();
+    await whenIdle();
+    expect(() => respondToVerification(attacker.token, verification.id, { response: "CONFIRM" })).toThrow(DomainError);
+    expect(() => respondToVerification(attacker.token, verification.id, { response: "DENY" })).toThrow(DomainError);
+    expect(answerEntries(verification.id)).toHaveLength(0);
+
+    getState().customer.balance = 100;
+    expect(() => respondToVerification(iphone.token, verification.id, { response: "CONFIRM" })).toThrow(
+      "Insufficient funds",
+    );
+    expect(answerEntries(verification.id)).toHaveLength(0);
+    expect(getSnapshot().verifications.find((v) => v.id === verification.id)?.status).toBe("PENDING");
+
+    respondToVerification(iphone.token, verification.id, { response: "DENY" });
+    expect(() => respondToVerification(iphone.token, verification.id, { response: "CONFIRM" })).toThrow(DomainError);
+    expect(answerEntries(verification.id).map((e) => e.action)).toEqual(["VERIFICATION_DENIED"]);
+  });
+});
+
 describe("verification never goes to the session that asked for the payment", () => {
   const HOME = { ip: "10.0.0.2", city: "Dubai", country: "AE" };
   const ABROAD = { ip: "203.0.113.9", city: "London", country: "GB" };
