@@ -492,7 +492,7 @@ button { font: inherit; color: inherit; }
 .caption {
   position: relative;
   flex: none;
-  height: calc(var(--u) * 10.4);
+  height: calc(var(--u) * 11.6);
   border-radius: var(--r-lg);
   border: 1px solid var(--line);
   background: var(--ink-900);
@@ -506,9 +506,13 @@ button { font: inherit; color: inherit; }
 .caption-kicker[data-tone="protected"] { color: var(--protected); }
 .caption-text { font-size: calc(var(--u) * 2.7); font-weight: 650; line-height: 1.22; margin-top: var(--sp-1); letter-spacing: -0.005em; }
 .caption-body { transition: opacity var(--t-med); }
-.finale { position: absolute; inset: 0; padding: var(--sp-2) var(--sp-5); display: flex; flex-direction: column; justify-content: center; gap: var(--sp-1); opacity: 0; transition: opacity var(--t-slow); color: #04140d; }
-.finale-title { font-size: calc(var(--u) * 2.5); font-weight: 850; letter-spacing: 0.005em; line-height: 1.08; text-wrap: balance; }
-.finale-line { font-size: var(--fs-sm); font-weight: 650; line-height: 1.28; }
+.finale { position: absolute; inset: 0; padding: var(--sp-3) var(--sp-5); display: flex; flex-direction: column; justify-content: center; gap: calc(var(--u) * 0.6); opacity: 0; transition: opacity var(--t-slow); color: #04140d; }
+.finale-title { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: calc(var(--u) * 1.2); font-size: calc(var(--u) * 2.25); font-weight: 850; letter-spacing: 0.005em; line-height: 1.08; }
+.finale-phrase { white-space: nowrap; }
+.finale-sep { opacity: .55; }
+.finale-title.is-wrapped .finale-sep { display: none; }
+.finale-title.is-wrapped .finale-phrase { flex-basis: 100%; }
+.finale-line { font-size: calc(var(--u) * 1.45); font-weight: 650; line-height: 1.28; }
 .caption.is-finale { background: var(--protected); border-color: var(--protected); }
 .caption.is-finale .caption-body { opacity: 0; }
 .caption.is-finale .finale { opacity: 1; }
@@ -532,6 +536,11 @@ button { font: inherit; color: inherit; }
 .panel-meta { font-size: var(--fs-2xs); color: var(--text-3); text-align: right; }
 .subhead { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-xs); font-weight: 700; color: var(--text-2); margin-top: var(--sp-2); flex: none; }
 .subhead-meta { font-size: var(--fs-2xs); font-weight: 500; color: var(--text-3); }
+.subhead--agent { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; row-gap: 0; }
+.subhead--agent .subhead-meta { grid-column: 1 / -1; }
+.engine-badge { grid-column: 2; grid-row: 1; font-size: var(--fs-2xs); font-weight: 700; white-space: nowrap; padding: calc(var(--u) * 0.2) var(--sp-2); border-radius: var(--r-sm); border: 1px solid currentColor; }
+.engine-badge[data-engine="devin"] { color: var(--ai); background: rgba(183, 156, 255, .12); }
+.engine-badge[data-engine="deterministic-fallback"] { color: #e3c27a; background: rgba(255, 197, 61, .08); border-style: dashed; }
 
 /* Risk gauge (hero) */
 .risk-gauge { display: grid; grid-template-columns: calc(var(--u) * 21.5) 1fr; gap: var(--sp-4); align-items: center; margin-top: var(--sp-2); flex: none; }
@@ -599,7 +608,7 @@ button { font: inherit; color: inherit; }
   border: 1px solid var(--line);
   background: var(--ink-850);
   padding: var(--sp-2) var(--sp-3);
-  min-height: calc(var(--u) * 6.6);
+  min-height: calc(var(--u) * 6);
   display: flex; flex-direction: column; justify-content: center;
   transition: background var(--t-med), border-color var(--t-med);
 }
@@ -620,11 +629,11 @@ button { font: inherit; color: inherit; }
 .action-tile.is-new { animation: flashIn var(--t-slow) var(--ease); }
 
 /* Investigation */
-.tool-list { list-style: none; display: flex; flex-direction: column; gap: var(--sp-1); margin-top: var(--sp-2); flex: 1; min-height: 0; overflow: hidden; position: relative; }
+.tool-list { list-style: none; display: flex; flex-direction: column; gap: calc(var(--u) * 0.2); margin-top: var(--sp-2); flex: 1; min-height: 0; overflow: hidden; position: relative; }
 .tool-empty { font-size: var(--fs-xs); color: var(--text-3); padding: var(--sp-3); border: 1px dashed var(--line); border-radius: var(--r-md); }
 .tool-call {
   display: grid; grid-template-columns: calc(var(--u) * 2) 1fr; column-gap: var(--sp-2); align-items: start;
-  padding: calc(var(--u) * 0.35) var(--sp-2);
+  padding: calc(var(--u) * 0.25) var(--sp-2);
   border-radius: var(--r-sm);
   animation: rise var(--t-med) var(--ease);
 }
@@ -643,7 +652,7 @@ button { font: inherit; color: inherit; }
   border-radius: var(--r-md);
   border: 1px dashed var(--line);
   padding: var(--sp-3) var(--sp-3);
-  min-height: calc(var(--u) * 14.5);
+  min-height: calc(var(--u) * 13);
   display: flex; flex-direction: column;
   position: relative;
   transition: background var(--t-med), border-color var(--t-med);
@@ -671,7 +680,7 @@ button { font: inherit; color: inherit; }
   grid-template-rows: repeat(5, 1fr);
   grid-auto-flow: column;
   column-gap: var(--sp-5);
-  margin-top: calc(var(--u) * 0.5);
+  margin-top: calc(var(--u) * 0.3);
   flex: 1; min-height: 0;
 }
 .audit-empty { grid-column: 1 / -1; grid-row: 1; font-size: var(--fs-xs); color: var(--text-3); align-self: center; }
@@ -682,7 +691,7 @@ button { font: inherit; color: inherit; }
   animation: rise var(--t-med) var(--ease);
 }
 .audit-time { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); }
-.audit-text { font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.audit-text { font-size: var(--fs-xs); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .audit-source { font-size: var(--fs-2xs); font-weight: 700; padding: 0 var(--sp-2); border-radius: var(--r-sm); white-space: nowrap; }
 .audit-source[data-source="auth"] { color: var(--text-2); background: var(--ink-700); }
 .audit-source[data-source="telco"] { color: var(--band-elevated); background: rgba(255, 197, 61, .12); }
@@ -760,7 +769,7 @@ button { font: inherit; color: inherit; }
         <svg viewBox="0 0 16 16" aria-hidden="true" id="playIcon"><path d="M4 2.5v11l9-5.5-9-5.5Z" fill="currentColor"/></svg>
         <span id="playLabel">Start attack</span>
       </button>
-      <button class="ctrl" id="btnNext" type="button" title="Next step (Right arrow)" aria-label="Next step">
+      <button class="ctrl" id="btnNext" type="button" title="Next step (Right arrow). Shift+Right arrow or Shift+click: jump to the end of the stage" aria-label="Next step" aria-keyshortcuts="ArrowRight Shift+ArrowRight">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5v11l7-5.5-7-5.5Z" fill="currentColor"/><rect x="11" y="2.5" width="2" height="11" fill="currentColor"/></svg>
       </button>
       <button class="ctrl" id="btnRestart" type="button" title="Restart (R)" aria-label="Restart">
@@ -879,7 +888,7 @@ button { font: inherit; color: inherit; }
             <div class="action-tile" id="actIncident"><span class="action-label">Incident</span><span class="action-value"></span><span class="action-sub"></span></div>
           </div>
 
-          <div class="subhead"><span>AI investigation agent</span><span class="subhead-meta">Recommends and explains, does not execute</span></div>
+          <div class="subhead subhead--agent"><span>Devin - AI investigation agent</span><span class="subhead-meta">Recommends and explains, does not execute</span><span class="engine-badge" id="engineBadge"></span></div>
           <ol class="tool-list" id="toolList"></ol>
 
           <div class="verdict" id="verdict">
@@ -887,7 +896,7 @@ button { font: inherit; color: inherit; }
             <div class="verdict-content">
               <div class="verdict-head">
                 <span class="verdict-title" id="verdictTitle"></span>
-                <span class="verdict-by">AI verdict</span>
+                <span class="verdict-by" id="verdictBy"></span>
               </div>
               <p class="verdict-text" id="verdictText"></p>
               <div class="verdict-action">
@@ -1026,6 +1035,12 @@ const RISK_MODEL = {
   ]
 };
 const EVENT_TYPES = ['LOGIN', 'SIM_SWAP', 'ADD_BENEFICIARY', 'TRANSFER'];
+const ENGINES = {
+  'devin': { badge: 'Devin session', verdictBy: 'Devin verdict', source: 'Devin', started: 'Devin investigation session started', kicker: 'Devin investigation' },
+  'deterministic-fallback': { badge: 'Deterministic fallback - no LLM', verdictBy: 'Fallback verdict', source: 'Fallback', started: 'Fallback investigation started', kicker: 'Fallback investigation' }
+};
+/* The investigation engine. The script uses Devin; ?engine=fallback renders the fallback for a visual check. */
+const ENGINE = new URLSearchParams(location.search).get('engine') === 'fallback' ? 'deterministic-fallback' : 'devin';
 
 const bandFor = score => RISK_MODEL.bands.find(b => score >= b.min && score <= b.max);
 const money = n => 'AED ' + n.toLocaleString('en-US');
@@ -1064,7 +1079,7 @@ function initialState() {
     risk: { score: 0, band: 'low', signals: [] },                     // signals: [{ id, points, detail, band }]
     payment: { status: 'none', amount: null, beneficiary: null, debited: false }, // none | requested | held
     session: { status: 'none' },                                      // none | active | restricted
-    investigation: { status: 'idle', toolCalls: [] },                 // toolCalls: [{ name, status: running|done, result }]
+    investigation: { engine: ENGINE, status: 'idle', toolCalls: [] }, // engine: devin | deterministic-fallback; toolCalls: [{ name, status: running|done, result }]
     incident: null,                                                   // { id, status }
     verdict: null,                                                    // { title, explanation, action }
     audit: []                                                         // [{ time, text, source }]
@@ -1174,8 +1189,10 @@ const SCRIPT = [
       log(s, 'Session restricted (risk 90)', 'gateway');
   } },
   { t: 28000, stage: 4, apply(s) {
+      const eng = ENGINES[s.investigation.engine];
       s.moment = null; s.investigation.status = 'running';
-      s.caption = { kicker: 'AI investigation', tone: 'ai', text: 'The agent calls tools to collect evidence. The money is already safe.' };
+      log(s, eng.started, 'agent');
+      s.caption = { kicker: eng.kicker, tone: 'ai', text: 'The agent calls tools to collect evidence. The money is already safe.' };
   } },
   ...TOOLS.flatMap(([name, result], i) => {
     const t0 = 28400 + i * 1500;
@@ -1195,7 +1212,7 @@ const SCRIPT = [
         explanation: 'The session runs on an unknown Galaxy A54 while the trusted iPhone 15 Pro is idle. The SIM was swapped 45 min before login, so the SMS code proves nothing. In 3 minutes it added a never-paid beneficiary and asked for AED 85,000, 28x the usual AED 3,000.',
         action: 'Hold payment + restrict session'
       };
-      s.caption = { kicker: 'AI verdict', tone: 'ai', text: 'The agent explains the decision from its tool results. Code took the actions.' };
+      s.caption = { kicker: ENGINES[s.investigation.engine].verdictBy, tone: 'ai', text: 'The agent explains the decision from its tool results. Code took the actions.' };
   } },
   { t: 39600, stage: 4, apply(s) {
       s.clock = '02:03:11';
@@ -1308,7 +1325,14 @@ function render(state, opts = {}) {
   $('captionKicker').dataset.tone = state.caption.tone || '';
   $('captionText').textContent = state.caption.text;
   $('caption').classList.toggle('is-finale', !!state.finale);
-  if (state.finale) { $('finaleTitle').textContent = state.finale.title; $('finaleLine').textContent = state.finale.line; }
+  if (state.finale) {
+    // Title phrases are split on the bullet; fitFinaleTitle() hides it when the phrases wrap.
+    $('finaleTitle').innerHTML = state.finale.title.split(' \u2022 ')
+      .map(t => '<span class="finale-phrase">' + t + '</span>').join('<span class="finale-sep" aria-hidden="true">\u2022</span>');
+    $('finaleTitle').setAttribute('aria-label', state.finale.title);
+    $('finaleLine').textContent = state.finale.line;
+    fitFinaleTitle();
+  }
 
   /* Customer */
   const c = state.customer;
@@ -1397,6 +1421,10 @@ function render(state, opts = {}) {
     li.querySelector('.tool-result').textContent = tc.status === 'running' ? 'running...' : tc.result;
   }, 'Waiting. The agent starts once the gateway has acted.', 'tool-empty');
 
+  const eng = ENGINES[state.investigation.engine];
+  $('engineBadge').textContent = eng.badge;
+  $('engineBadge').dataset.engine = state.investigation.engine;
+  $('verdictBy').textContent = eng.verdictBy;
   const v = state.verdict;
   $('verdict').classList.toggle('is-shown', !!v);
   if (v) {
@@ -1405,7 +1433,7 @@ function render(state, opts = {}) {
   }
 
   /* Audit log: show the latest 10 (two columns of five) */
-  const SOURCES = { auth: 'Auth', telco: 'Telco', session: 'Session', gateway: 'Gateway', agent: 'AI agent', risk: 'Risk engine' };
+  const SOURCES = { auth: 'Auth', telco: 'Telco', session: 'Session', gateway: 'Gateway', agent: eng.source, risk: 'Risk engine' };
   syncList($('auditList'), state.audit.slice(-10), e => e.time + e.text, () => {
     const li = document.createElement('li'); li.className = 'audit-entry';
     li.innerHTML = '<span class="audit-time"></span><span class="audit-text"></span><span class="audit-source"></span>'; return li;
@@ -1423,6 +1451,13 @@ function render(state, opts = {}) {
 
   prev = structuredClone(state);
 }
+
+function fitFinaleTitle() {
+  const title = $('finaleTitle'), phrases = title.querySelectorAll('.finale-phrase');
+  title.classList.remove('is-wrapped');
+  if (phrases.length > 1) title.classList.toggle('is-wrapped', phrases[phrases.length - 1].offsetTop > phrases[0].offsetTop + 2);
+}
+window.addEventListener('resize', fitFinaleTitle);
 
 function setPresence(el, [cls, icon, label]) {
   el.className = 'presence' + (cls ? ' ' + cls : '');
@@ -1485,6 +1520,17 @@ function nextStep() {
   if (player.cursor >= SCRIPT.length) return;
   player.elapsed = SCRIPT[player.cursor].t; applyNext(); render(player.state); updateControls();
 }
+/* Jump to the end state of the current stage, or of the next stage if the current one is complete */
+function nextStage() {
+  pause();
+  if (player.cursor >= SCRIPT.length) return;
+  const cur = player.state.stage;
+  const target = SCRIPT[player.cursor].stage === cur ? cur : SCRIPT[player.cursor].stage;
+  while (player.cursor < SCRIPT.length && SCRIPT[player.cursor].stage <= target) applyNext();
+  player.elapsed = SCRIPT[player.cursor - 1].t;
+  player.state.moment = null;
+  render(player.state); updateControls();
+}
 function restart() {
   pause(); player.state = initialState(); player.cursor = 0; player.elapsed = 0;
   render(player.state, { instant: true }); updateControls();
@@ -1508,11 +1554,12 @@ function updateControls() {
 }
 
 $('btnPlay').addEventListener('click', togglePlay);
-$('btnNext').addEventListener('click', nextStep);
+$('btnNext').addEventListener('click', e => (e.shiftKey ? nextStage() : nextStep()));
 $('btnRestart').addEventListener('click', restart);
 document.addEventListener('keydown', e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'ArrowRight' && e.shiftKey) { e.preventDefault(); nextStage(); }
   else if (e.key === 'ArrowRight') { e.preventDefault(); nextStep(); }
   else if (e.key === 'r' || e.key === 'R') { restart(); }
 });
