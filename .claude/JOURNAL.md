@@ -129,3 +129,11 @@ Workarounds in the view-model, because the snapshot lacks the data: run id (uses
 The dashboard was ported from the demo before the subtitle band existed, so it keeps the caption row at the top; the demo and the dashboard differ there on purpose for now.
 Three polish defects found in my check and delegated: verdict text clamped at 4 lines, engine badge shown when no investigation ran, customer actions tagged in attacker red in A and C.
 Not yet tested live: a real Devin run and a real 422 on verification CONFIRM.
+
+## 2026-11-21 - Tunnel created and the public guard verified through it
+
+A named Cloudflare tunnel with one proxied CNAME for the tool endpoints, origin `http://localhost:3000`.
+Checked through the real tunnel: `/`, `/api/state`, `/api/reset`, `/api/payments` and `/_next/static/*` answer 404 on the public host; tool endpoints answer the generic 401 without a valid token, also for unknown tool names.
+So the tunnel passes the public `Host` to the origin and the guard works; the open risk from the engine merge entry is closed.
+`cloudflared tunnel route dns <tunnel> <bare-name>` appends the zone of the logged-in certificate, which is how the zone name was found without asking.
+Still open: Devin key and org id are not in `.env.local` yet, so no real Devin run has happened.
