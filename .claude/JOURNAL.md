@@ -120,3 +120,12 @@ Roman chose: Devin makes real tool calls, through `cloudflared`, on a subdomain 
 Rejected a quick tunnel on trycloudflare.com: the URL changes on every start, so `GLD_PUBLIC_URL` would have to be edited before each run.
 Rejected "no public URL, backend collects tool results": Devin would not make the tool calls itself.
 `cloudflared` 2026.10.7 is installed on the Mac but not logged in, so `cloudflared tunnel login` (browser) must be run by Roman once.
+
+## 2026-11-21 - Dashboard merged and checked end to end by the lead
+
+Played scenarios A, B and C in a browser against `next start`, plus "Retry transfer" and "No, it wasn't me" in B: backend state and UI agree (B: HELD, 92,000, RESTRICTED, 15/40/55/75/90, INC-0001; after DENY: CANCELLED, REVOKED, CONFIRMED_ATO).
+The backend applies a whole event at once, so the UI stages the TRANSFER event itself (55 -> 75 -> HOLD stamp -> 90 -> RESTRICTED stamp -> tool calls), driven by `Payment.action` and signal `cumulative` values.
+Workarounds in the view-model, because the snapshot lacks the data: run id (uses scenario id plus the `seq` of `SCENARIO_STARTED`), which step fired a signal (matches `detectedAt` to the step clock), typical amount (median computed in the UI).
+The dashboard was ported from the demo before the subtitle band existed, so it keeps the caption row at the top; the demo and the dashboard differ there on purpose for now.
+Three polish defects found in my check and delegated: verdict text clamped at 4 lines, engine badge shown when no investigation ran, customer actions tagged in attacker red in A and C.
+Not yet tested live: a real Devin run and a real 422 on verification CONFIRM.
