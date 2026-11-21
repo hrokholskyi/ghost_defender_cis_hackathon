@@ -9,15 +9,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ScenarioId, StateSnapshot } from "@/lib/types";
 import { acceptSnapshot } from "./accept-snapshot";
 import { api, describeError } from "./api";
+import { autoplayPauseMs, autoplayToggle, canFireNext, presenterKey, type PresenterTopBarView } from "./presenter";
 import { planReveal, syncReveal, type Reveal } from "./reveal";
 import { runContext } from "./run-context";
 import { toView, type PendingRequest, type UiState, type View } from "./view-model";
 
 const POLL_MS = 500;
-/** Autoplay: about this long between two events. */
-const AUTOPLAY_GAP_MS = 3000;
-/** Autoplay: pause after the previous event's animation finished. */
-const AUTOPLAY_AFTER_IDLE_MS = 900;
 const DEFAULT_SCENARIO: ScenarioId = "B";
 
 interface RunLocal {
@@ -37,8 +34,10 @@ export interface DashboardActions {
   closeAudit(): void;
 }
 
+export type DashboardView = View & { topbar: PresenterTopBarView };
+
 export interface Dashboard {
-  view: View | null;
+  view: DashboardView | null;
   actions: DashboardActions;
   auditOpen: boolean;
   reachable: boolean;
@@ -56,11 +55,11 @@ export function useDashboard(): Dashboard {
   const [autoplay, setAutoplay] = useState(false);
   const [reachable, setReachable] = useState(true);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [lastEventAt, setLastEventAt] = useState(0);
   const [auditOpen, setAuditOpen] = useState(false);
 
   const snapshotRef = useRef<StateSnapshot | null>(null);
   const busyRef = useRef(false);
+  const revealIdleRef = useRef(true);
   const autoStarted = useRef<string | null>(null);
 
   // Keep the reveal in step with the snapshot's run (adjusting state while rendering).
@@ -150,7 +149,6 @@ export function useDashboard(): Dashboard {
       setPending(null);
       if (r.ok) {
         accept(r.data);
-        setLastEventAt(Date.now());
       } else {
         setActionError(describeError(r));
       }
@@ -160,7 +158,13 @@ export function useDashboard(): Dashboard {
 
   const next = useCallback(async () => {
     const s = snapshotRef.current;
-    if (busyRef.current || !s?.scenario || s.scenario.nextStep >= s.scenario.totalSteps) return;
+    const gate = {
+      busy: busyRef.current,
+      revealIdle: revealIdleRef.current,
+      hasScenario: !!s?.scenario,
+      finished: !!s?.scenario && s.scenario.nextStep >= s.scenario.totalSteps,
+    };
+    if (!canFireNext(gate)) return;
     busyRef.current = true;
     setPending("next");
     setActionError(null);
@@ -169,7 +173,8 @@ export function useDashboard(): Dashboard {
     setPending(null);
     if (r.ok) {
       accept(r.data.state);
-      setLastEventAt(Date.now());
+      // The new event's reveal starts with the next render; block Next until then.
+      revealIdleRef.current = false;
       if (r.data.scenario.nextStep >= r.data.scenario.totalSteps) setAutoplay(false);
     } else {
       setActionError(describeError(r));
@@ -184,12 +189,10 @@ export function useDashboard(): Dashboard {
   const toggleAutoplay = useCallback(() => {
     const s = snapshotRef.current;
     const finished = !!s?.scenario && s.scenario.nextStep >= s.scenario.totalSteps;
-    if (autoplay) {
-      setAutoplay(false);
-      return;
-    }
-    setAutoplay(true);
-    if (finished || !s?.scenario) void start(s?.scenario?.id ?? DEFAULT_SCENARIO, true);
+    const action = autoplayToggle({ autoplay, hasScenario: !!s?.scenario, finished });
+    if (action === "ignore") return;
+    setAutoplay(action !== "stop");
+    if (action === "start-scenario") void start(DEFAULT_SCENARIO, true);
   }, [autoplay, start]);
 
   const verify = useCallback(
@@ -246,44 +249,37 @@ export function useDashboard(): Dashboard {
     return () => clearTimeout(timer);
   }, [snapshot, start]);
 
-  // Autoplay: next event about every 3 s, and never before the previous animation finished.
   const scenarioId = snapshot?.scenario?.id ?? null;
   const finished = !!snapshot?.scenario && snapshot.scenario.nextStep >= snapshot.scenario.totalSteps;
   const revealIdle = plan === null;
   useEffect(() => {
-    if (!autoplay || pending !== null || finished || !revealIdle || !scenarioId) return;
-    const wait = Math.max(AUTOPLAY_AFTER_IDLE_MS, AUTOPLAY_GAP_MS - (Date.now() - lastEventAt));
-    const timer = setTimeout(() => void next(), wait);
-    return () => clearTimeout(timer);
-  }, [autoplay, pending, finished, revealIdle, scenarioId, lastEventAt, next]);
+    revealIdleRef.current = revealIdle;
+  });
 
-  // Presenter keys.
+  // Presenter keys. Held keys never act.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) return;
-      if (auditOpen) {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          setAuditOpen(false);
-        }
-        return;
-      }
-      if (e.key === "ArrowRight" || e.code === "Space") {
-        e.preventDefault();
-        if (!e.repeat) void next();
-      } else if (e.key === "p" || e.key === "P") {
-        toggleAutoplay();
-      } else if (e.key === "r" || e.key === "R") {
-        restart();
-      }
+      const { action, preventDefault } = presenterKey({
+        key: e.key,
+        code: e.code,
+        repeat: e.repeat,
+        modified: e.metaKey || e.ctrlKey || e.altKey,
+        typing: isTypingTarget(e.target),
+        auditOpen,
+      });
+      if (preventDefault) e.preventDefault();
+      if (action === "close-audit") setAuditOpen(false);
+      else if (action === "next") void next();
+      else if (action === "autoplay") toggleAutoplay();
+      else if (action === "restart") restart();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [auditOpen, next, toggleAutoplay, restart]);
 
-  const view = useMemo(() => {
+  const view = useMemo<DashboardView | null>(() => {
     if (!snapshot || !reveal) return null;
-    return toView(snapshot, {
+    const v = toView(snapshot, {
       reveal,
       pending,
       autoplay,
@@ -292,7 +288,17 @@ export function useDashboard(): Dashboard {
       retry: current.retry,
       verifyError: current.verifyError,
     });
-  }, [snapshot, reveal, pending, autoplay, reachable, actionError, current.retry, current.verifyError]);
+    const revealing = !revealIdle && !v.topbar.finished;
+    return { ...v, topbar: { ...v.topbar, revealing, nextDisabled: v.topbar.nextDisabled || revealing } };
+  }, [snapshot, reveal, pending, autoplay, reachable, actionError, current.retry, current.verifyError, revealIdle]);
+
+  // Autoplay: wait for the reveal to finish, then long enough to read the caption on screen.
+  const captionText = view?.caption.text ?? "";
+  useEffect(() => {
+    if (!autoplay || pending !== null || finished || !revealIdle || !scenarioId) return;
+    const timer = setTimeout(() => void next(), autoplayPauseMs(captionText));
+    return () => clearTimeout(timer);
+  }, [autoplay, pending, finished, revealIdle, scenarioId, captionText, next]);
 
   const actions = useMemo<DashboardActions>(
     () => ({

@@ -902,3 +902,16 @@ button:disabled { cursor: default; }
 
 /* The gateway kept a stronger action than the investigator recommended. */
 .verdict-overruled { color: var(--protected); background: color-mix(in srgb, var(--protected) 14%, transparent); border: 1px solid var(--protected); padding: 0 var(--sp-2); border-radius: var(--r-sm); font-size: var(--fs-2xs); font-weight: 700; }
+
+/* Top bar status: fixed width, so a long error never moves the chips or pushes the controls off screen. */
+.topbar { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+/* The status takes no width of its own: the brand block is as wide as the SIMULATION tag. */
+.link-status, .engine-status { width: 0; min-width: 100%; max-width: 100%; }
+.engine-status-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Next waits while the last event is still playing. */
+.ctrl--primary[aria-busy="true"] { cursor: progress; }
+
+/* Tighter top bar spacing, so the longest Next label and all chips fit at 16:9. */
+.topbar { column-gap: var(--sp-4); }
+.event-chips { gap: var(--sp-1); }
