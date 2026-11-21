@@ -113,3 +113,10 @@ Roman asked for English subtitles: present and explain the screen sections first
 Read as: Tour, Case A, Case B, Case C, Closing card, with one bottom subtitle track replacing the top caption row.
 Rejected adding only step subtitles to case B: chapters cover both readings of "case", and `?chapter=b&only=1` still gives the short attack-only run.
 The live dashboard is being ported from the pre-subtitle demo; it keeps its narrator caption for now.
+
+## 2026-11-21 - Devin reaches the tools through a named Cloudflare tunnel
+
+Roman chose: Devin makes real tool calls, through `cloudflared`, on a subdomain of his own domain; credentials will be a v3 PAT or service user key (`cog_`), not the legacy key.
+Rejected a quick tunnel on trycloudflare.com: the URL changes on every start, so `GLD_PUBLIC_URL` would have to be edited before each run.
+Rejected "no public URL, backend collects tool results": Devin would not make the tool calls itself.
+`cloudflared` 2026.10.7 is installed on the Mac but not logged in, so `cloudflared tunnel login` (browser) must be run by Roman once.
