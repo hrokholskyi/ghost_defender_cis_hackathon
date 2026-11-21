@@ -1,0 +1,44 @@
+# Decision log
+
+## 2026-11-21 - Stack and project shape
+
+Next.js 16 (App Router) + TypeScript, in-memory state on `globalThis`, vitest for tests, plain CSS (no Tailwind).
+This is the stack the case description prefers.
+Plain CSS was picked so the standalone animated demo (`demo/index.html`) can be ported to the dashboard 1:1.
+
+## 2026-11-21 - Contract first, then parallel agents
+
+`src/lib/types.ts` is the shared contract, written before any agent started.
+Phase 1 runs three Opus agents in parallel: animated HTML demo, bank core (risk engine, gateways, API, tests), AI investigator.
+The investigator gets its tools by injection (`InvestigationTools`), already bound to one session and one payment, so it could be built without the core.
+A placeholder investigator in `src/lib/investigator/index.ts` lets the core be tested alone.
+The dashboard (phase 2) starts only after the demo and the core are merged, because it ports the demo design and calls the real API.
+
+## 2026-11-21 - Protective actions are code, the LLM only recommends
+
+The payment gateway decides HOLD and session restriction synchronously from the deterministic Risk Engine, before any debit.
+The AI investigation runs after that decision, asynchronously.
+Its recommendation goes through the policy gateway, which can only tighten protection and never release a hold.
+Rejected: letting the LLM call `hold_payment` or release tools directly, because the case requires that free model text cannot lift a mandatory block and that a missing LLM never lets a high-risk payment through.
+
+## 2026-11-21 - UI updates by polling, not SSE
+
+The dashboard polls `GET /api/state` about twice per second.
+Rejected SSE: more moving parts in Next.js route handlers for no visible gain in a single-screen demo.
+
+## 2026-11-21 - Scenario cursor lives on the server
+
+`POST /api/scenarios/{id}/start` and `POST /api/scenarios/next` run demo steps through the same domain functions as the public routes.
+Rejected: a client-side step-to-request mapper, because it duplicates logic in the UI and tests would not cover it.
+
+## 2026-11-21 - Default investigator model is claude-sonnet-5-5
+
+The investigation is shown live in a 5-minute pitch, so several tool-use round trips must finish in seconds.
+Sonnet was picked over Opus for latency.
+`GLD_MODEL` overrides it.
+No `ANTHROPIC_API_KEY` was present on the dev machine at start, so end-to-end checks ran on the deterministic fallback.
+
+## 2026-11-21 - vitest 5 needs @types/node 22
+
+`create-next-app` pins `@types/node@^20`, and vitest 5.1 fails to install with it (peer conflict).
+Bumped `@types/node` to `^22`, which also matches the local Node 22.
