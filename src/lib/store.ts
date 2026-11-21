@@ -4,6 +4,7 @@
  * Kept on globalThis so it survives Next.js dev hot reload and is shared by
  * all route handlers. All data is synthetic.
  */
+import { randomUUID } from "node:crypto";
 import { DEFAULT_START_AT } from "@/lib/config";
 import type {
   AuditEntry,
@@ -52,8 +53,9 @@ export interface BankState {
 }
 
 const GLOBAL_KEY = "__ghostLoginDefenderStore";
+const SERVER_ID_KEY = "__ghostLoginDefenderServerId";
 
-type GlobalWithStore = typeof globalThis & { [GLOBAL_KEY]?: BankState };
+type GlobalWithStore = typeof globalThis & { [GLOBAL_KEY]?: BankState; [SERVER_ID_KEY]?: string };
 
 export const SEED_CUSTOMER_ID = "cust-001";
 export const SEED_TRUSTED_DEVICE_ID = "dev-iphone";
@@ -173,6 +175,13 @@ export function getState(): BankState {
   const g = globalThis as GlobalWithStore;
   if (!g[GLOBAL_KEY]) g[GLOBAL_KEY] = seedState(1, DEFAULT_START_AT);
   return g[GLOBAL_KEY];
+}
+
+/** Id of this server process. Survives hot reload and simulator resets, changes on a real restart. */
+export function getServerId(): string {
+  const g = globalThis as GlobalWithStore;
+  if (!g[SERVER_ID_KEY]) g[SERVER_ID_KEY] = randomUUID();
+  return g[SERVER_ID_KEY];
 }
 
 const EPOCH_ABORT_KEY = "__ghostLoginDefenderEpochAbort";

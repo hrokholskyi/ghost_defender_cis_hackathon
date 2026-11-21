@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ScenarioId, StateSnapshot } from "@/lib/types";
+import { acceptSnapshot } from "./accept-snapshot";
 import { api, describeError } from "./api";
 import { planReveal, syncReveal, type Reveal } from "./reveal";
 import { runContext } from "./run-context";
@@ -60,7 +61,7 @@ export function useDashboard(): Dashboard {
 
   const snapshotRef = useRef<StateSnapshot | null>(null);
   const busyRef = useRef(false);
-  const autoStarted = useRef(false);
+  const autoStarted = useRef<string | null>(null);
 
   // Keep the reveal in step with the snapshot's run (adjusting state while rendering).
   let current = local;
@@ -79,8 +80,7 @@ export function useDashboard(): Dashboard {
   const reveal = current.reveal;
 
   const accept = useCallback((next: StateSnapshot | null | undefined) => {
-    if (!next || typeof next.seq !== "number") return;
-    setSnapshot((prev) => (!prev || next.seq >= prev.seq ? next : prev));
+    setSnapshot((prev) => (acceptSnapshot(prev, next) ? next : prev));
   }, []);
 
   useEffect(() => {
@@ -238,10 +238,10 @@ export function useDashboard(): Dashboard {
     await refresh();
   }, [refresh]);
 
-  // First load with no active scenario: start scenario B, so the calm pre-attack screen shows.
+  // First load from a server with no active scenario: start scenario B, so the calm pre-attack screen shows.
   useEffect(() => {
-    if (!snapshot || snapshot.scenario || autoStarted.current) return;
-    autoStarted.current = true;
+    if (!snapshot || snapshot.scenario || autoStarted.current === snapshot.serverId) return;
+    autoStarted.current = snapshot.serverId;
     const timer = setTimeout(() => void start(DEFAULT_SCENARIO), 0);
     return () => clearTimeout(timer);
   }, [snapshot, start]);

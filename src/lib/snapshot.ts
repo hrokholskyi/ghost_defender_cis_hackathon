@@ -2,13 +2,14 @@ import { RISK_CONFIG } from "@/lib/config";
 import { now } from "@/lib/clock";
 import { getLlmStatus } from "@/lib/investigator";
 import { SCENARIO_INFOS } from "@/lib/scenario-catalog";
-import { getState } from "@/lib/store";
+import { getServerId, getState } from "@/lib/store";
 import type { StateSnapshot } from "@/lib/types";
 
 /** A deep copy of the public state for GET /api/state. */
 export function getSnapshot(): StateSnapshot {
   const s = getState();
   return structuredClone({
+    serverId: getServerId(),
     seq: s.seq,
     now: now(),
     customer: s.customer,

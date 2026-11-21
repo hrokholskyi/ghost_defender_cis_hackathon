@@ -37,9 +37,9 @@ export interface RunContext {
   trustedSession: Session | undefined;
 }
 
-/** Identifies one scenario run. Changes on every scenario start or reset. */
+/** Identifies one scenario run. Changes on every scenario start, reset or server restart. */
 export function runKey(s: StateSnapshot): string {
-  return `${s.scenario?.id ?? "none"}:${s.audit[0]?.seq ?? 0}`;
+  return `${s.serverId}:${s.scenario?.id ?? "none"}:${s.audit[0]?.seq ?? 0}`;
 }
 
 export function runContext(s: StateSnapshot): RunContext {

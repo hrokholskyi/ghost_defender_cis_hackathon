@@ -473,6 +473,8 @@ export interface ScenarioProgress {
 // ---------------------------------------------------------------------------
 
 export interface StateSnapshot {
+  /** Random id of the server process. Changes on a server restart, not on a simulator reset. */
+  serverId: string;
   /** Increases on every state mutation. */
   seq: number;
   /** Simulated clock. */
