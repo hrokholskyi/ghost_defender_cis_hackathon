@@ -57,3 +57,11 @@ Verdict comes back through `structured_output_schema` (JSON Schema draft 7), rea
 REST is polling only, docs say not faster than every 10 s, no webhooks; no documented session start or run time, so latency must be measured with a real key.
 Devin has no function-calling API: it runs on its own VM, so "tools" must be HTTP endpoints on a public URL of our app (or an org-level MCP server, which cannot be set per session through the API).
 Consequence: tool steps are reported when Devin hits our endpoints, the verdict arrives by polling, and the time cap for the engine must be minutes, not the 45 s planned for Claude.
+
+## 2026-11-21 - Investigator seam merged: engine output is never trusted
+
+The LLM engine plugs in as `LlmEngine` in `src/lib/investigator/index.ts`; the orchestrator owns timeline reporting, the time cap, zod validation and the switch to the fallback.
+The verdict's `incidentId` always comes from a real `create_incident` result, never from engine text, and the orchestrator opens the incident itself when an engine recommends a hold without opening one.
+`create_incident` input from an engine is validated before it reaches the core.
+The default engine cap is 45 s, which was sized for Claude; the Devin engine must pass a larger `engineTimeoutMs`.
+For Devin, the HTTP tool endpoint must map tool names to methods on the tracked `tools` object and reject unknown names; the orchestrator does not do that.
