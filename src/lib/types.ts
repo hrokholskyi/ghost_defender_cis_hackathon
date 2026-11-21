@@ -286,7 +286,7 @@ export interface InvestigationTools {
   create_incident(input: CreateIncidentInput): Promise<Incident>;
 }
 
-export type InvestigationEngine = "claude" | "deterministic-fallback";
+export type InvestigationEngine = "devin" | "deterministic-fallback";
 
 export type InvestigationStep =
   | {
