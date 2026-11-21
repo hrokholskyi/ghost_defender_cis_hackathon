@@ -414,3 +414,30 @@ describe("scenario C, legitimate phone change", () => {
     noEmDash(view);
   });
 });
+
+describe("engine badge and audit actor tags by scenario", () => {
+  it("marks the investigation active only when one ran", async () => {
+    for (const id of ["A", "C"] as const) {
+      const view = settledView(await runToEnd(id));
+      expect(view.investigation.active).toBe(false);
+    }
+    const b = settledView(await runToEnd("B"));
+    expect(b.investigation.active).toBe(true);
+    expect(b.investigation.fallbackReason).toBeTruthy();
+  });
+
+  it("tags the customer's own transfer as Customer in A and C and as Session in B", async () => {
+    for (const id of ["A", "C"] as const) {
+      const view = settledView(await runToEnd(id));
+      const row = view.audit.recent.find((r) => r.text.startsWith("Transfer requested"));
+      expect(row).toMatchObject({ source: "customer", sourceLabel: "Customer" });
+      const full = view.audit.all.filter((r) => r.action === "PAYMENT_REQUESTED");
+      expect(full.length).toBeGreaterThan(0);
+      for (const r of full) expect(r.actor).toBe("Customer");
+    }
+    const b = settledView(await runToEnd("B"));
+    const row = b.audit.recent.find((r) => r.text.startsWith("Transfer requested"));
+    expect(row).toMatchObject({ source: "session", sourceLabel: "Session" });
+    expect(b.audit.all.find((r) => r.action === "PAYMENT_REQUESTED")?.actor).toBe("Logged-in session");
+  });
+});

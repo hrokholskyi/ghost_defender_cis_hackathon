@@ -52,7 +52,7 @@ export type NoteTone = "normal" | "key" | "hostile";
 export type PresenceTone = "" | "alert" | "hostile" | "blocked" | "active" | "neutral";
 export type PresenceIcon = "moon" | "bell" | "dot" | "lock" | "check";
 export type TileTone = "" | "warn" | "held" | "restricted" | "open" | "safe";
-export type AuditSource = "auth" | "telco" | "session" | "gateway" | "agent" | "risk" | "verify";
+export type AuditSource = "auth" | "telco" | "session" | "customer" | "gateway" | "agent" | "risk" | "verify";
 
 export interface Chip {
   type: ScenarioEventType;
@@ -177,6 +177,8 @@ export type InvestigationItem =
 
 export interface InvestigationView {
   engine: InvestigationEngine;
+  /** True when an investigation exists for this run (running, completed or failed). */
+  active: boolean;
   badge: string;
   fallbackReason: string | null;
   items: InvestigationItem[];
@@ -1060,6 +1062,7 @@ function investigation(d: Derived): InvestigationView {
 
   return {
     engine,
+    active: visible,
     badge: eng.badge,
     fallbackReason: inv && inv.engine === "deterministic-fallback" ? (inv.fallbackReason ?? null) : null,
     items,
@@ -1081,6 +1084,8 @@ function auditLine(e: AuditEntry, d: Derived): { text: string; source: AuditSour
   const data = e.data ?? {};
   const amount = typeof data.amount === "number" ? money(data.amount) : "";
   const engineSource: AuditSource = "agent";
+  // The session is the attacker's only in the takeover scenario. In A and C it is the real customer.
+  const sessionSource: AuditSource = d.variant === "takeover" ? "session" : "customer";
   switch (e.action) {
     case "LOGIN_SUCCEEDED":
       return { text: data.trusted
@@ -1092,10 +1097,10 @@ function auditLine(e: AuditEntry, d: Derived): { text: string; source: AuditSour
       return { text: `Telco: SIM swapped at ${hm(typeof data.swappedAt === "string" ? data.swappedAt : "")}`, source: "telco" };
     case "BENEFICIARY_ADDED": {
       const ben = d.s.beneficiaries.find((b) => b.id === data.beneficiaryId);
-      return { text: `Beneficiary added: ${ben?.name ?? "new payee"}`, source: "session" };
+      return { text: `Beneficiary added: ${ben?.name ?? "new payee"}`, source: sessionSource };
     }
     case "PAYMENT_REQUESTED":
-      return { text: `Transfer requested: ${amount}`, source: "session" };
+      return { text: `Transfer requested: ${amount}`, source: sessionSource };
     case "PAYMENT_HELD":
       return { text: "Payment held before debit", source: "gateway" };
     case "PAYMENT_PENDING_VERIFICATION":
@@ -1182,6 +1187,7 @@ const AUDIT_SOURCE_LABELS: Record<Exclude<AuditSource, "agent">, string> = {
   auth: "Auth",
   telco: "Telco",
   session: "Session",
+  customer: "Customer",
   gateway: "Gateway",
   risk: "Risk engine",
   verify: "Verify",
@@ -1206,7 +1212,7 @@ function audit(d: Derived, engine: InvestigationEngine): View["audit"] {
     all: d.s.audit.map((e) => ({
       seq: e.seq,
       time: hms(e.at),
-      actor: ACTOR_LABELS[e.actor] ?? e.actor,
+      actor: e.actor === "customer" && d.variant !== "takeover" ? "Customer" : (ACTOR_LABELS[e.actor] ?? e.actor),
       action: e.action,
       detail: e.detail,
     })),
