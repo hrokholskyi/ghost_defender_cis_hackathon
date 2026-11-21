@@ -41,7 +41,7 @@ export interface UiState {
   /** Error of the last start / next request. */
   actionError: string | null;
   /** Result of the attacker's "Retry transfer". */
-  retry: { status: "idle" | "pending" | "refused" | "done"; message?: string; sessionStatus?: string };
+  retry: { status: "idle" | "pending" | "refused" | "done"; message?: string; code?: string; sessionStatus?: string };
   /** Error of the last answer to the verification push. */
   verifyError: string | null;
 }
@@ -106,7 +106,7 @@ export interface AppView {
     kind: "restricted" | "revoked";
     title: string;
     sub: string;
-    retry: { pressed: boolean; busy: boolean; refused: string | null };
+    retry: { pressed: boolean; busy: boolean; refused: string | null; refusedCode: string | null };
   };
 }
 
@@ -178,10 +178,12 @@ export type InvestigationItem =
 
 export interface InvestigationView {
   engine: InvestigationEngine;
+  title: string;
   /** True when an investigation exists for this run (running, completed or failed). */
   active: boolean;
   badge: string;
   fallbackReason: string | null;
+  fallbackReasonText: string | null;
   items: InvestigationItem[];
   emptyText: string;
   progress: null | { label: string; elapsed: string; note: string };
@@ -245,24 +247,35 @@ export interface View {
 const BAND_TEXT: Record<BandId, { label: string; action: string; kicker: string }> = {
   low: { label: "Low", action: "Monitor", kicker: "Monitor" },
   elevated: { label: "Elevated", action: "Extra verification", kicker: "Extra verification" },
-  high: { label: "High", action: "Hold payment", kicker: "Hold payment" },
-  critical: { label: "Critical", action: "Hold + restrict session + incident", kicker: "Restrict session" },
+  high: { label: "High", action: "Hold payment + incident", kicker: "Hold payment" },
+  critical: { label: "Critical", action: "Hold payment + restrict session + incident", kicker: "Restrict session" },
 };
 
 const SIGNAL_HINTS: Record<RiskSignalId, string> = {
   UNKNOWN_DEVICE: "Session on a device never seen before",
-  RECENT_SIM_SWAP: "Telco reports a new SIM on this number",
+  RECENT_SIM_SWAP: "Synthetic telco signal: new SIM on this number",
   UNUSUAL_NETWORK: "Network or location unlike the customer",
-  NEW_BENEFICIARY: "Payee added in the current session",
+  NEW_BENEFICIARY: "Beneficiary added in the current session",
   UNUSUAL_AMOUNT: "Far above the typical transfer",
-  RAPID_SEQUENCE: "Login, new payee and transfer in minutes",
+  RAPID_SEQUENCE: "Login, new beneficiary and transfer in minutes",
 };
 
 export const ENGINES: Record<
   InvestigationEngine,
-  { badge: string; verdictBy: string; source: string; started: string; kicker: string; running: string; status: string }
+  {
+    title: string;
+    badge: string;
+    verdictBy: string;
+    source: string;
+    started: string;
+    kicker: string;
+    running: string;
+    status: string;
+    failedCaption: string;
+  }
 > = {
   devin: {
+    title: "AI investigation agent (Devin)",
     badge: "Devin session",
     verdictBy: "Devin verdict",
     source: "Devin",
@@ -270,8 +283,10 @@ export const ENGINES: Record<
     kicker: "Devin investigation",
     running: "Devin is investigating",
     status: "Investigator: Devin",
+    failedCaption: "The protective actions stay in place. Code took them, not the agent.",
   },
   "deterministic-fallback": {
+    title: "Investigation agent (deterministic fallback, no LLM)",
     badge: "Deterministic fallback - no LLM",
     verdictBy: "Fallback verdict",
     source: "Fallback",
@@ -279,6 +294,7 @@ export const ENGINES: Record<
     kicker: "Fallback investigation",
     running: "Fallback investigation running",
     status: "Investigator: deterministic fallback",
+    failedCaption: "The protective actions stay in place. Code took them, not the investigation.",
   },
 };
 
@@ -323,6 +339,26 @@ const ACTOR_LABELS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const RETRY_REFUSALS: Record<string, string> = {
+  SESSION_RESTRICTED: "Refused. Session restricted.",
+  SESSION_REVOKED: "Refused. Session revoked.",
+  PAYMENT_HELD: "Refused. Payment is on hold.",
+};
+
+/** Plain text for a refused retry, built from the API error code. */
+export function retryRefusalText(code: string, message: string): string {
+  const known = RETRY_REFUSALS[code];
+  if (known) return known;
+  const text = message.trim();
+  if (!text) return "Refused.";
+  return `Refused. ${/[.!?]$/.test(text) ? text : `${text}.`}`;
+}
+
+/** Short fallback reason for the panel. The full reason, with variable names, stays in the tooltip. */
+export function fallbackReasonText(reason: string): string {
+  return reason.startsWith("Devin not configured") ? "Devin is not configured for this run." : reason;
+}
 
 export function bandFor(score: number, t: StateSnapshot["riskConfig"]["thresholds"]): BandId {
   if (score >= t.critical) return "critical";
@@ -507,8 +543,8 @@ function signalCaption(d: Derived, id: RiskSignalId): string {
       return "The network is unlike the customer's usual one.";
     case "NEW_BENEFICIARY":
       return d.revealed.some((x) => x.id === "RECENT_SIM_SWAP")
-        ? "Unknown device, new SIM, new payee. Any payment now needs extra checks."
-        : "A payee added in this session. Any payment now needs extra checks.";
+        ? "Unknown device, new SIM, new beneficiary. Any payment now needs extra checks."
+        : "A beneficiary added in this session. Any payment now needs extra checks.";
     case "UNUSUAL_AMOUNT": {
       const typical = typicalAmount(s, ctx.payment?.id);
       const ratio = typical > 0 ? Math.round(d.amount / typical) : null;
@@ -521,7 +557,7 @@ function signalCaption(d: Derived, id: RiskSignalId): string {
       const m =
         ctx.actorSession && ctx.payment ? minutesBetween(ctx.actorSession.createdAt, ctx.payment.requestedAt) : null;
       const crosses = d.score >= critical ? ` Risk crosses ${critical}.` : "";
-      return `Login, new payee and a large transfer in ${m ?? "a few"} minutes.${crosses}`;
+      return `Login, new beneficiary and a large transfer in ${m ?? "a few"} minutes.${crosses}`;
     }
   }
 }
@@ -553,10 +589,9 @@ function caption(d: Derived): View["caption"] {
   if (step.type === "TRANSFER" && r.gate && inv && !d.restrictionLifted) {
     const eng = ENGINES[inv.engine];
     if (inv.status === "RUNNING" || !d.verdictShown)
-      return { kicker: eng.kicker, tone: "ai", text: "The agent calls tools to collect evidence. The money is already safe." };
-    if (inv.status === "FAILED")
-      return { kicker: "Investigation failed", tone: "ai", text: "The protective actions stay in place. Code took them, not the agent." };
-    return { kicker: eng.verdictBy, tone: "ai", text: "The agent explains the decision from its tool results. Code took the actions." };
+      return { kicker: eng.kicker, tone: "ai", text: "The investigation collects evidence with tools. Nothing has been debited." };
+    if (inv.status === "FAILED") return { kicker: "Investigation failed", tone: "ai", text: eng.failedCaption };
+    return { kicker: eng.verdictBy, tone: "ai", text: "The investigation explains the decision." };
   }
 
   if (settled && lastSignal) return { kicker: riskKicker(d), tone: "", text: signalCaption(d, lastSignal.id) };
@@ -573,14 +608,14 @@ function caption(d: Derived): View["caption"] {
           : { kicker: stepKicker, tone: "", text: `${name} signs in on her own trusted iPhone, from home.` };
       return { kicker: stepKicker, tone: "", text: `${name} signs in from a new ${ctx.actorDevice?.label ?? "phone"} at home. No SIM swap.` };
     case "SIM_SWAP":
-      return { kicker: stepKicker, tone: "", text: `A telco signal arrives for ${name}'s phone number.` };
+      return { kicker: stepKicker, tone: "", text: `A synthetic telco signal arrives for ${name}'s phone number.` };
     case "ADD_BENEFICIARY":
       return { kicker: stepKicker, tone: "", text: `The session adds a new beneficiary: ${ben}.` };
     case "TRANSFER":
       if (variant === "takeover") return { kicker: stepKicker, tone: "", text: `The attacker requests ${amount} to ${ben}.` };
       if (d.paymentShown === "settled")
-        return { kicker: riskKicker(d), tone: "", text: `Known payee, usual amount. The gateway allows ${amount} at once.` };
-      return { kicker: stepKicker, tone: "", text: `${name} sends ${amount} to ${ben}, a payee she has paid before.` };
+        return { kicker: riskKicker(d), tone: "", text: `Known beneficiary, usual amount. The gateway allows ${amount} at once.` };
+      return { kicker: stepKicker, tone: "", text: `${name} sends ${amount} to ${ben}, a beneficiary she has paid before.` };
   }
 }
 
@@ -601,7 +636,7 @@ function finaleFor(d: Derived): View["finale"] {
       return {
         tone: "protected",
         title: `ACCOUNT TAKEOVER CONTAINED • ${money(d.amount)} PROTECTED (SIMULATION)`,
-        line: "Password correct. SMS code correct. Login successful. The agent still spotted a stranger's session and stopped the transfer before the money left.",
+        line: "Password correct. SMS code correct. Login successful. The defender spotted a stranger's session and held the transfer before any debit. A verified login is not proof of safety.",
       };
     }
     return null;
@@ -616,7 +651,7 @@ function finaleFor(d: Derived): View["finale"] {
   }
   return {
     tone: "calm",
-    title: `NEW PHONE • ${money(d.amount)} SETTLED (SIMULATION)`,
+    title: `LEGITIMATE PHONE CHANGE • ${money(d.amount)} SETTLED (SIMULATION)`,
     line: "New device alone is not proof of fraud. Payment approved, session monitored.",
   };
 }
@@ -659,7 +694,8 @@ function appView(d: Derived): AppView {
         return {
           pressed: current && d.ui.retry.status !== "idle",
           busy: d.ui.retry.status === "pending",
-          refused: current && d.ui.retry.status === "refused" ? (d.ui.retry.message ?? "Request refused") : null,
+          refused: current && d.ui.retry.status === "refused" ? (d.ui.retry.message ?? "Refused.") : null,
+          refusedCode: current && d.ui.retry.status === "refused" ? (d.ui.retry.code ?? null) : null,
         };
       })(),
     };
@@ -754,7 +790,7 @@ function customer(d: Derived): CustomerView {
   } else if (variant === "normal") {
     presence = mode === "app" ? { tone: "active", icon: "dot", label: "Using the app" } : { tone: "", icon: "dot", label: "Idle" };
     note = { text: `Pays her rent instalment from her own phone, as every month.`, tone: "normal" };
-    if (d.paymentShown === "settled") note = { text: "Known device, known payee, usual amount. No extra checks needed.", tone: "key" };
+    if (d.paymentShown === "settled") note = { text: "Known device, known beneficiary, usual amount. No extra checks needed.", tone: "key" };
   } else {
     presence = { tone: "", icon: "dot", label: "Idle" };
     note = { text: `Her old ${device?.label ?? "iPhone"} stays on file as a trusted device.`, tone: "normal" };
@@ -832,10 +868,10 @@ function side(d: Derived): SideView {
 
   let note: Note = { text: `Has ${name}'s password, phished by a fake bank SMS earlier today.`, tone: "hostile" };
   if (d.r.signals.includes("RECENT_SIM_SWAP"))
-    note = { text: `Receives ${name}'s SMS codes on the swapped SIM. That is how the code was correct.`, tone: "hostile" };
+    note = { text: `Can receive ${name}'s SMS codes on the swapped SIM. That would explain the correct code.`, tone: "hostile" };
   if (d.sessionShown === "restricted")
     note = { text: "The transfer is frozen and the session can no longer move money.", tone: "hostile" };
-  if (d.sessionShown === "revoked") note = { text: "The session is revoked. The attacker is signed out for good.", tone: "hostile" };
+  if (d.sessionShown === "revoked") note = { text: "The session is revoked. The attacker is signed out.", tone: "hostile" };
   if (d.restrictionLifted) note = { text: `${name} confirmed this transfer was hers, so the restriction is lifted.`, tone: "normal" };
 
   const device = ctx.actorDevice ?? s.devices.find((x) => !x.trusted);
@@ -1010,7 +1046,7 @@ export function summarizeTool(step: Extract<InvestigationStep, { kind: "tool_cal
       }
       case "check_beneficiary": {
         const r = out as BeneficiaryCheckResult;
-        if (r.knownBefore) return `${r.name}: known payee, ${r.priorSettledPayments} earlier payments.`;
+        if (r.knownBefore) return `${r.name}: known beneficiary, ${r.priorSettledPayments} earlier payments.`;
         return `${r.name}: never paid before${r.addedInThisSession ? ", added in this session" : ""}.`;
       }
       case "create_incident": {
@@ -1038,9 +1074,8 @@ function investigation(d: Derived): InvestigationView {
       )
     : [];
 
-  let emptyText = "Waiting. The agent starts once the gateway has acted.";
-  if (variant !== "takeover" && d.paymentShown === "settled")
-    emptyText = "Not needed. The gateway allowed the payment at low risk.";
+  let emptyText = "Waiting. The investigation starts once the gateway has acted.";
+  if (variant !== "takeover" && d.paymentShown === "settled") emptyText = "Not needed. Low risk, so no investigation starts.";
 
   let progress: InvestigationView["progress"] = null;
   if (visible && inv.status === "RUNNING") {
@@ -1052,7 +1087,7 @@ function investigation(d: Derived): InvestigationView {
       elapsed: elapsed(inv.startedAt, s.now),
       note: protections.length
         ? `Protection did not wait: ${protections.join(" and ")} by code.`
-        : "Protection did not wait for the agent.",
+        : "Protection did not wait for the investigation.",
     };
   }
 
@@ -1061,7 +1096,7 @@ function investigation(d: Derived): InvestigationView {
     if (inv.status === "FAILED" || !inv.verdict) {
       verdict = {
         title: "Investigation failed",
-        text: "The agent could not finish. The payment hold and the session restriction stay in place, because code applied them.",
+        text: "The investigation could not finish. The payment hold and the session restriction stay in place, because code applied them.",
         action: null,
         by: eng.verdictBy,
         failed: true,
@@ -1087,18 +1122,21 @@ function investigation(d: Derived): InvestigationView {
     }
   }
 
+  const fallbackReason = inv && inv.engine === "deterministic-fallback" ? (inv.fallbackReason ?? null) : null;
   return {
     engine,
+    title: eng.title,
     active: visible,
     badge: eng.badge,
-    fallbackReason: inv && inv.engine === "deterministic-fallback" ? (inv.fallbackReason ?? null) : null,
+    fallbackReason,
+    fallbackReasonText: fallbackReason === null ? null : fallbackReasonText(fallbackReason),
     items,
     emptyText,
     progress,
     verdict,
     verdictEmpty:
       variant !== "takeover" && d.paymentShown === "settled"
-        ? "No investigation. Low risk payments go through without one."
+        ? "No investigation for a Low risk payment."
         : "The verdict appears when the investigation finishes.",
   };
 }
@@ -1121,10 +1159,10 @@ function auditLine(e: AuditEntry, d: Derived): { text: string; source: AuditSour
             ? "Login OK on unknown device"
             : "Login OK on new device", source: "auth" };
     case "SIM_SWAP_REPORTED":
-      return { text: `Telco: SIM swapped at ${hm(typeof data.swappedAt === "string" ? data.swappedAt : "")}`, source: "telco" };
+      return { text: `Telco (synthetic): SIM swapped at ${hm(typeof data.swappedAt === "string" ? data.swappedAt : "")}`, source: "telco" };
     case "BENEFICIARY_ADDED": {
       const ben = d.s.beneficiaries.find((b) => b.id === data.beneficiaryId);
-      return { text: `Beneficiary added: ${ben?.name ?? "new payee"}`, source: sessionSource };
+      return { text: `Beneficiary added: ${ben?.name ?? "new beneficiary"}`, source: sessionSource };
     }
     case "PAYMENT_REQUESTED":
       return { text: `Transfer requested: ${amount}`, source: sessionSource };

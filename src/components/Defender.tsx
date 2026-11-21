@@ -298,7 +298,7 @@ function ResponsePanel({ actions, investigation: inv }: Pick<View, "actions" | "
     <section className="panel panel--response" aria-label="Response" ref={panelRef}>
       <div className="panel-head">
         <h2 className="panel-title">Protective actions</h2>
-        <span className="panel-meta">Executed by the payment gateway, in code</span>
+        <span className="panel-meta">Hold and restrict: payment gateway, in code. Incident: opened by the agent or by code.</span>
       </div>
       <div className="actions">
         <ActionTile label="Payment" tile={actions.payment} />
@@ -307,13 +307,13 @@ function ResponsePanel({ actions, investigation: inv }: Pick<View, "actions" | "
       </div>
 
       <div className="subhead subhead--agent">
-        <span>Devin - AI investigation agent</span>
-        <span className="subhead-meta">Recommends and explains, does not execute</span>
+        <span>{inv.title}</span>
+        <span className="subhead-meta">Explains and recommends. Opens the incident. Cannot move or release money.</span>
         <span className="engine-badge" data-engine={inv.engine} aria-hidden={!inv.active}>
           {inv.badge}
         </span>
         <span className="engine-reason" title={inv.fallbackReason ?? undefined} aria-hidden={!inv.active || !inv.fallbackReason}>
-          {inv.active && inv.fallbackReason ? `Fallback reason: ${inv.fallbackReason}` : "\u00a0"}
+          {inv.active && inv.fallbackReason ? `Fallback reason: ${inv.fallbackReasonText}` : "\u00a0"}
         </span>
       </div>
       <ToolList inv={inv} />
@@ -332,7 +332,7 @@ function AuditPanel({ audit, onOpen }: { audit: View["audit"]; onOpen(): void })
       <div className="panel-head">
         <h2 className="panel-title">Audit log</h2>
         <span className="panel-meta">
-          Every event and action, in order
+          Latest events and actions, in order
           <button type="button" className="audit-open" onClick={onOpen} title="Show every audit entry">
             <ListIcon />
             Full audit log ({audit.all.length})

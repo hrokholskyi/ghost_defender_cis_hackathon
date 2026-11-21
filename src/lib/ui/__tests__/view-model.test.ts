@@ -9,7 +9,7 @@ import { respondToVerification } from "@/lib/verification";
 import { linkify } from "../format";
 import { emptyReveal, fullReveal, planReveal, revealedScore, syncReveal, type Reveal } from "../reveal";
 import { runContext, runKey } from "../run-context";
-import { toView, type UiState, type View } from "../view-model";
+import { fallbackReasonText, retryRefusalText, toView, type UiState, type View } from "../view-model";
 
 beforeEach(freshStore);
 
@@ -45,7 +45,7 @@ function play(s: StateSnapshot, from: Reveal): { reveal: Reveal; views: View[] }
 }
 
 function noEmDash(view: View): void {
-  expect(JSON.stringify(view)).not.toMatch(/—/);
+  expect(JSON.stringify(view)).not.toMatch(/[—–]/);
 }
 
 async function runToEnd(id: ScenarioId): Promise<StateSnapshot> {
@@ -132,7 +132,12 @@ describe("scenario B, step by step", () => {
 
     nextScenarioStep();
     s = getSnapshot();
-    expect(toView(s, ui(syncReveal(reveal, s))).caption.kicker).toBe("Step 2 of 4 - SIM_SWAP");
+    const simArrival = toView(s, ui(syncReveal(reveal, s)));
+    expect(simArrival.caption.kicker).toBe("Step 2 of 4 - SIM_SWAP");
+    expect(simArrival.caption.text).toBe("A synthetic telco signal arrives for Layla's phone number.");
+    expect(simArrival.risk.signals.find((x) => x.id === "RECENT_SIM_SWAP")?.detail).toBe(
+      "Synthetic telco signal: new SIM on this number",
+    );
     let played = play(s, reveal);
     let end = played.views[played.views.length - 1];
     expect(end.risk.score).toBe(40);
@@ -140,7 +145,7 @@ describe("scenario B, step by step", () => {
     expect(end.caption.text).toBe("The SIM was swapped 45 minutes before login. The SMS code no longer proves it is Layla.");
     expect(end.customer.phone.serviceAlert).toBe(true);
     expect(end.side.phone?.app.simFlag).toBe(true);
-    expect(end.audit.recent.map((r) => r.text)).toContain("Telco: SIM swapped at 01:15");
+    expect(end.audit.recent.map((r) => r.text)).toContain("Telco (synthetic): SIM swapped at 01:15");
     reveal = played.reveal;
 
     nextScenarioStep();
@@ -153,7 +158,7 @@ describe("scenario B, step by step", () => {
     end = played.views[played.views.length - 1];
     expect(end.risk.score).toBe(55);
     expect(end.side.phone?.app.beneficiary.added).toBe(true);
-    expect(end.caption.text).toBe("Unknown device, new SIM, new payee. Any payment now needs extra checks.");
+    expect(end.caption.text).toBe("Unknown device, new SIM, new beneficiary. Any payment now needs extra checks.");
   });
 
   it("TRANSFER: 55 -> 75 -> HOLD -> 90 -> RESTRICTED -> investigation", async () => {
@@ -195,7 +200,7 @@ describe("scenario B, step by step", () => {
     expect(restrict.band).toBe("critical");
     expect(restrict.actions.session).toMatchObject({ tone: "restricted", value: "Restricted" });
     expect(restrict.side.phone?.app.lockout?.title).toBe("Session restricted");
-    expect(restrict.caption.text).toBe("Login, new payee and a large transfer in 3 minutes. Risk crosses 80.");
+    expect(restrict.caption.text).toBe("Login, new beneficiary and a large transfer in 3 minutes. Risk crosses 80.");
     expect(restrict.investigation.items).toHaveLength(0);
     expect(restrict.customer.phone.push).toBeNull();
 
@@ -229,6 +234,15 @@ describe("scenario B, step by step", () => {
     expect(end.customer.presence.label).toBe("Notified");
     expect(end.customer.phone.widget).toMatchObject({ balance: 92000, status: "Unchanged - nothing debited", protected: true });
     expect(end.finale).toMatchObject({ tone: "protected", title: "ACCOUNT TAKEOVER CONTAINED • AED 85,000 PROTECTED (SIMULATION)" });
+    expect(end.finale?.line).toBe(
+      "Password correct. SMS code correct. Login successful. The defender spotted a stranger's session and held the transfer before any debit. A verified login is not proof of safety.",
+    );
+    expect(end.risk.bands.map((b) => b.action)).toEqual([
+      "Monitor",
+      "Extra verification",
+      "Hold payment + incident",
+      "Hold payment + restrict session + incident",
+    ]);
     expect(end.topbar.chips.every((c) => c.status === "done")).toBe(true);
     expect(end.topbar.nextDisabled).toBe(true);
     expect(end.topbar.nextLabel).toBe("Finished");
@@ -247,7 +261,10 @@ describe("investigation engine display", () => {
     const view = settledView(s);
     expect(view.investigation.engine).toBe("deterministic-fallback");
     expect(view.investigation.badge).toBe("Deterministic fallback - no LLM");
+    expect(view.investigation.title).toBe("Investigation agent (deterministic fallback, no LLM)");
     expect(view.investigation.fallbackReason).toBeTruthy();
+    expect(view.investigation.fallbackReasonText).toBe(fallbackReasonText(view.investigation.fallbackReason!));
+    expect(view.caption.text).toBe("The investigation explains the decision.");
     expect(view.audit.recent.find((r) => r.source === "agent")?.sourceLabel).toBe("Fallback");
   });
 
@@ -267,6 +284,8 @@ describe("investigation engine display", () => {
     ];
     const view = settledView(s);
     expect(view.investigation.badge).toBe("Devin session");
+    expect(view.investigation.title).toBe("AI investigation agent (Devin)");
+    expect(view.caption.text).toBe("The investigation collects evidence with tools. Nothing has been debited.");
     expect(view.investigation.fallbackReason).toBeNull();
     expect(view.investigation.progress).toEqual({
       label: "Devin is investigating",
@@ -289,6 +308,24 @@ describe("investigation engine display", () => {
     }
     const running = view.investigation.items[3];
     expect(running).toMatchObject({ kind: "tool", status: "running", result: "running..." });
+  });
+
+  it("uses the title of the configured engine when no investigation ran", async () => {
+    const s = structuredClone(await runToEnd("A"));
+    expect(settledView(s).investigation.title).toBe("Investigation agent (deterministic fallback, no LLM)");
+    s.llm.configured = true;
+    expect(settledView(s).investigation.title).toBe("AI investigation agent (Devin)");
+  });
+
+  it("shortens a not-configured fallback reason and keeps the full reason for the tooltip", async () => {
+    const reason = "Devin not configured: set DEVIN_API_KEY, DEVIN_ORG_ID and GLD_PUBLIC_URL";
+    expect(fallbackReasonText(reason)).toBe("Devin is not configured for this run.");
+    expect(fallbackReasonText("Investigator error: boom")).toBe("Investigator error: boom");
+    const s = structuredClone(await runToEnd("B"));
+    s.investigations[0].fallbackReason = reason;
+    const view = settledView(s);
+    expect(view.investigation.fallbackReason).toBe(reason);
+    expect(view.investigation.fallbackReasonText).toBe("Devin is not configured for this run.");
   });
 
   it("linkify keeps plain text without URLs intact", () => {
@@ -340,14 +377,26 @@ describe("customer answers on the trusted iPhone", () => {
     const s = getSnapshot();
     const view = toView(
       s,
-      ui(fullReveal(s), { retry: { status: "refused", message: "Request refused: 403 SESSION_RESTRICTED" } }),
+      ui(fullReveal(s), {
+        retry: { status: "refused", message: retryRefusalText("SESSION_RESTRICTED", "Session is restricted"), code: "403 SESSION_RESTRICTED" },
+      }),
     );
     expect(view.side.phone?.app.lockout?.retry).toEqual({
       pressed: true,
       busy: false,
-      refused: "Request refused: 403 SESSION_RESTRICTED",
+      refused: "Refused. Session restricted.",
+      refusedCode: "403 SESSION_RESTRICTED",
     });
     expect(view.audit.recent[view.audit.recent.length - 1].text).toBe("Retry refused: session restricted");
+  });
+
+  it("builds the retry refusal text from the error code", () => {
+    expect(retryRefusalText("SESSION_RESTRICTED", "Session sess-002 is restricted")).toBe("Refused. Session restricted.");
+    expect(retryRefusalText("SESSION_REVOKED", "Session sess-002 is revoked")).toBe("Refused. Session revoked.");
+    expect(retryRefusalText("PAYMENT_HELD", "Payment pay-001 is held")).toBe("Refused. Payment is on hold.");
+    expect(retryRefusalText("INSUFFICIENT_FUNDS", "Insufficient funds")).toBe("Refused. Insufficient funds.");
+    expect(retryRefusalText("CONFLICT", "Payment already settled.")).toBe("Refused. Payment already settled.");
+    expect(retryRefusalText("HTTP_ERROR", "")).toBe("Refused.");
   });
 
   it("shows a verification error inline", async () => {
@@ -409,6 +458,7 @@ describe("scenario C, legitimate phone change", () => {
     expect(view.customer.phone.widget.balance).toBe(88800);
     expect(view.finale).toMatchObject({
       tone: "calm",
+      title: "LEGITIMATE PHONE CHANGE • AED 3,200 SETTLED (SIMULATION)",
       line: "New device alone is not proof of fraud. Payment approved, session monitored.",
     });
     noEmDash(view);

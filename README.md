@@ -1,8 +1,10 @@
 # Ghost Login Defender
 
-Ghost Login Defender is an AI agent inside a simulated bank that stops account takeover.
-The password and the SMS code are correct and the login succeeds, but the session is not the real customer.
-A deterministic Risk Engine scores the session, the Payment Gateway holds the transfer before any debit, and an investigation agent then calls tools, opens an incident and explains what it found.
+Ghost Login Defender is a simulated bank that holds a suspicious transfer before it is debited.
+A deterministic Risk Engine and Payment Gateway do the holding, in code.
+An AI investigation agent then collects evidence, opens an incident and explains.
+
+A verified login is not proof of safety.
 
 **This is a simulation.**
 **All data is synthetic.**
@@ -33,7 +35,7 @@ Without Devin settings the investigation runs on the deterministic fallback, and
 
 The dashboard shows a customer phone, a second phone for the session under watch, the Risk Engine, the Payment Gateway and the investigation timeline.
 
-- Pick a scenario with the **A**, **B** or **C** buttons in the top bar.
+- Pick Scenario A, B or C with the **A**, **B** or **C** buttons in the top bar.
 - **Next event** runs the next step of the scenario.
   Keyboard: Right arrow or Space.
 - **Autoplay** runs the remaining steps with a pause between them.
@@ -110,7 +112,7 @@ simulator events (login, SIM swap, add beneficiary, transfer)
   Verification: push to the customer's trusted device
 ```
 
-Key design rule: protective actions are code, and the investigator only recommends.
+Key design rule: protective actions are code, and the investigator only recommends and opens an incident.
 The Payment Gateway holds the payment and restricts the session from the Risk Engine result, before any debit, without waiting for any model.
 The investigator's recommendation goes through the Policy Gateway as the actor `ai-investigator`.
 For that actor the Policy Gateway can only tighten protection (hold, restrict).
@@ -155,7 +157,7 @@ Signals are sticky: once a signal fires for a session, it keeps its points and i
 | Band | Score | Action | What happens |
 | --- | --- | --- | --- |
 | LOW | 0-29 | `ALLOW` | The payment settles and the session is monitored |
-| ELEVATED | 30-59 | `STEP_UP` | The payment waits as `PENDING_VERIFICATION`, nothing is debited, a push goes to the trusted device |
+| ELEVATED | 30-59 | `STEP_UP` | The payment waits as `PENDING_VERIFICATION`, nothing is debited, a push goes to the trusted device, an investigation starts |
 | HIGH | 60-79 | `HOLD` | The payment is `HELD` before debit, a push goes to the trusted device, an investigation starts |
 | CRITICAL | 80-100 | `HOLD_AND_RESTRICT` | Same as HOLD, and the session is `RESTRICTED` (no payments, no beneficiary changes) |
 
@@ -174,7 +176,7 @@ The seed data has one customer with a balance of AED 92,000, one trusted iPhone 
 | B - Account takeover | 1. Login from a new Android phone. 2. The telco signal reports a SIM swap 45 minutes before login. 3. The attacker adds a new beneficiary. 4. The attacker requests AED 85,000 to it. | Risk 15, then 40, then 55, then 90 (CRITICAL). Payment `HELD` before debit. Attacker session `RESTRICTED`. Push to the trusted iPhone. Incident opened. Balance stays AED 92,000. |
 | C - Legitimate phone change | 1. Login from a new iPhone 16 at home. 2. Transfer AED 3,200 to a known family beneficiary. | Risk 15 (LOW), from the new device only. Payment `SETTLED`. Session stays `ACTIVE`. No incident. Balance AED 88,800. |
 
-In scenario B the transfer scores 75 on its own signals (new device, SIM swap, new beneficiary, unusual amount) before the rapid-sequence signal adds 15 to reach 90.
+In Scenario B the transfer scores 75 on its own signals (new device, SIM swap, new beneficiary, unusual amount) before the rapid-sequence signal adds 15 to reach 90.
 A retry of the held payment from the restricted session gets `403 SESSION_RESTRICTED`.
 Scenario B also keeps the customer's own iPhone signed in from the evening before, so the push has a trusted session to reach.
 
@@ -281,7 +283,7 @@ An invalid optional value makes Devin count as not configured, and the UI reason
 3. Start the app with `npm run dev`.
 4. Check the guard: `curl <GLD_PUBLIC_URL>/api/state` must return 404.
    If it returns the state, stop and fix the tunnel, because the tunnel is hiding the public host from the guard.
-5. Run scenario B on the local dashboard at http://localhost:3000.
+5. Run Scenario B on the local dashboard at http://localhost:3000.
    The top bar shows the Devin engine when it is configured.
 
 ## API
@@ -295,7 +297,7 @@ Errors have the shape `{ "error": { "code": "...", "message": "..." } }`.
 | --- | --- | --- | --- |
 | GET | `/api/state` | none | Full state snapshot, including session tokens (simulator only) |
 | POST | `/api/reset` | none | Reset to seed data |
-| POST | `/api/scenarios/{id}/start` | none | Reset and prepare scenario A, B or C |
+| POST | `/api/scenarios/{id}/start` | none | Reset and prepare Scenario A, B or C |
 | POST | `/api/scenarios/next` | none | Run the next step of the active scenario |
 | POST | `/api/login` | none | Create a session (simulated login, no credentials) |
 | POST | `/api/sim-swap` | none | Report a SIM swap (the synthetic telco signal) |
@@ -315,25 +317,28 @@ npm run typecheck
 npm run lint
 ```
 
-Current result: 14 test files, 124 tests, all passing.
+Current result: 19 test files, 168 tests, all passing.
 `npm run typecheck` and `npm run lint` report no errors.
 
-Tests live in `src/lib/__tests__` (bank core, 6 files), `src/lib/investigator/__tests__` (7 files) and `src/lib/ui/__tests__` (1 file).
+Tests live in `src/lib/__tests__` (core, 9 files), `src/lib/investigator/__tests__` (7 files) and `src/lib/ui/__tests__` (3 files).
 
 What the tests prove:
 
 | Acceptance criterion | Where |
 | --- | --- |
-| A held payment never settles, and the balance does not change | `scenarios.test.ts`, `routes.test.ts` (scenario B ends with the payment `HELD` and balance AED 92,000) |
+| A held payment never settles, and the balance does not change | `scenarios.test.ts`, `routes.test.ts` (Scenario B ends with the payment `HELD` and balance AED 92,000) |
 | A retry does not bypass the hold | `scenarios.test.ts`, `routes.test.ts` (restricted session gets 403, active session gets 409 `PAYMENT_HELD`, settled payments never debit twice) |
 | A legitimate payment from a separate trusted session is not blocked | `scenarios.test.ts` (the trusted iPhone pays a known beneficiary during the incident) |
-| A new device alone does not block | `scenarios.test.ts` (scenario C: risk 15, payment settles, session stays active) |
+| A new device alone does not block | `scenarios.test.ts` (Scenario C: risk 15, payment settles, session stays active) |
 | Every decision has an explanation | `risk-engine.test.ts`, `scenarios.test.ts` (signals carry evidence, payments carry reasons, the audit log records each step) |
 | The investigator cannot release a hold | `policy-verification.test.ts` (release and lift requested by `ai-investigator` are denied and logged) |
 | An investigator failure leaves the payment held | `fail-safe.test.ts` (the investigator throws, the payment stays `HELD`, the session stays `RESTRICTED`, an incident is still opened) |
 
 The investigator tests also cover the Devin client, the Devin engine, the tool endpoint, the fallback and the public-host guard.
-All of them run against a fake Devin API (`devin-fakes.ts`).
+No test calls the real Devin API.
+The engine, tool endpoint and wiring tests use a fake Devin client (`devin-fakes.ts`), and the client tests use a stubbed `fetch`.
+The core tests also cover the scenario clock, input validation and the investigation lifecycle.
+The UI tests cover the dashboard view model, including its on-screen texts, and the snapshot order check.
 
 ## What is a stub or simulated, and what is verified
 
@@ -354,7 +359,7 @@ Simulated or stubbed:
 - **Session tokens.** They are exposed in `GET /api/state` on purpose, so the dashboard can act as both phones.
   This is acceptable only because it is a simulator.
 
-Verified against the real Devin API (two runs of scenario B on 2026-11-21, through a named Cloudflare tunnel):
+Verified against the real Devin API (two runs of Scenario B on 2026-11-21, through a named Cloudflare tunnel):
 
 - The create-session body is accepted as sent, and the response contains the session `url`.
 - Devin called the five read tools and `create_incident` on the public tool endpoints, then submitted its verdict.
@@ -380,7 +385,7 @@ Still unverified:
 - "AED 85,000 protected" means a held transfer inside a simulator.
   It is not a real prevented loss.
 - A real bank would need, at least: IAM (identity and access management), a real payment rail, trusted verification channels, a durable audit store and an approved security policy.
-  It would also need real telco data under a legal basis, review of the model, and monitoring of the model's own behavior.
+  It would also need real telco data under a legal basis, review of the model, and monitoring of the model's own behaviour.
 
 ## Repository layout
 
